@@ -1,0 +1,12 @@
+interface:
+  display_name: "Bitget Agentic Wallet"
+  short_description: "Morph wallet reads, Agent ID, and approved developer transactions"
+  default_prompt: "Use $bitget-agentic-wallet in lightweight mode, or explicitly enable developer mode for a reviewed Morph transaction or contract deployment."
+policy:
+  allow_implicit_invocation: true
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "bitget-morph-wallet"
+      description: "Local WalletConnect bridge for user-approved Bitget Wallet sessions on Morph"
+      transport: "stdio"
