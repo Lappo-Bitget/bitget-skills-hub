@@ -60,6 +60,15 @@ receipt, contract address, and deployed code before reporting success. Read
 [references/hardhat-morph.md](references/hardhat-morph.md) for the workflow and
 secret-provider compatibility contract.
 
+To prepare a user's project, use `scripts/init-hardhat-morph.mjs`. Run its
+read-only `--plan` first. Only after the user confirms the exact target path,
+package versions, npm registry, and files shown in that plan may you rerun it
+with `--apply --confirm <plan-code>`. The initializer is idempotent, never
+overwrites existing source/config files, and stops on package or lockfile
+version conflicts. Read [references/hardhat-init.md](references/hardhat-init.md)
+before using it. Installing packages from npm is an external side effect and
+must be explicitly confirmed at action time.
+
 When entering developer mode, state which signing path is selected. For the
 Bitget Wallet path, explain that each transaction is reviewed and signed in the
 wallet. For the Hardhat path, explain that a configured host secret provider
