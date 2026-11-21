@@ -9,17 +9,28 @@ import { fileURLToPath } from 'node:url';
 const sourceRoot = dirname(fileURLToPath(import.meta.url));
 const sourceSkill = join(sourceRoot, 'skills', 'bitget-agentic-wallet');
 const home = homedir();
+const roaming = process.env.APPDATA || join(home, 'AppData', 'Roaming');
 const codexHome = process.env.CODEX_HOME || join(home, '.codex');
-const targetSkill = process.env.BITGET_SKILL_DIR || join(codexHome, 'skills', 'bitget-agentic-wallet');
-const bridgeDir = join(targetSkill, 'wallet-bridge');
-const bridgeServer = join(bridgeDir, 'server.mjs');
-const configPath = process.env.BITGET_CODEX_CONFIG || join(codexHome, 'config.toml');
+const claudeDesktopConfig = process.platform === 'win32'
+  ? join(roaming, 'Claude', 'claude_desktop_config.json')
+  : process.platform === 'darwin'
+    ? join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+    : join(home, '.config', 'Claude', 'claude_desktop_config.json');
+const clients = [
+  { name: 'Codex', skillDir: join(codexHome, 'skills'), config: process.env.BITGET_CODEX_CONFIG || join(codexHome, 'config.toml'), format: 'toml', detect: () => existsSync(codexHome) },
+  { name: 'Claude Code', skillDir: join(home, '.claude', 'skills'), config: process.env.BITGET_CLAUDE_CONFIG || join(home, '.claude.json'), format: 'json', detect: () => existsSync(join(home, '.claude')) || existsSync(join(home, '.claude.json')) },
+  { name: 'Claude Desktop', skillDir: join(home, '.claude', 'skills'), config: claudeDesktopConfig, format: 'json', detect: () => existsSync(claudeDesktopConfig) },
+  { name: 'Cursor', skillDir: join(home, '.cursor', 'skills'), config: join(home, '.cursor', 'mcp.json'), format: 'json', detect: () => existsSync(join(home, '.cursor')) },
+  { name: 'Windsurf', skillDir: join(home, '.codeium', 'windsurf', 'skills'), config: join(home, '.codeium', 'windsurf', 'mcp_config.json'), format: 'json', detect: () => existsSync(join(home, '.codeium', 'windsurf')) },
+  { name: 'Gemini CLI', skillDir: join(home, '.gemini', 'skills'), config: join(home, '.gemini', 'settings.json'), format: 'json', detect: () => existsSync(join(home, '.gemini')) },
+  { name: 'Cline', skillDir: join(home, '.agents', 'skills'), config: join(roaming, 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json'), format: 'json', detect: () => existsSync(join(roaming, 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev')) }
+];
 
 function log(message) {
   process.stdout.write(`[bitget-skills-hub] ${message}\n`);
 }
 
-function configureCodex() {
+function configureToml(configPath, bridgeServer) {
   mkdirSync(dirname(configPath), { recursive: true });
   const existing = existsSync(configPath) ? readFileSync(configPath, 'utf8') : '';
   const block = `[mcp_servers.bitget-morph-wallet]\ncommand = "node"\nargs = [${JSON.stringify(bridgeServer)}]\n`;
@@ -34,23 +45,29 @@ function configureCodex() {
     updated = `${existing.trimEnd()}${existing.trim() ? '\n\n' : ''}${block}`;
   }
   if (updated !== existing) writeFileSync(configPath, updated, 'utf8');
-  log(`Codex MCP 已配置: ${configPath}`);
 }
 
-function configureClaudeCode() {
-  const claudeConfig = process.env.BITGET_CLAUDE_CONFIG || join(home, '.claude.json');
+function configureJson(configPath, bridgeServer) {
+  mkdirSync(dirname(configPath), { recursive: true });
   let data = {};
-  if (existsSync(claudeConfig)) {
-    try { data = JSON.parse(readFileSync(claudeConfig, 'utf8')); } catch { data = {}; }
+  if (existsSync(configPath)) {
+    try { data = JSON.parse(readFileSync(configPath, 'utf8')); }
+    catch { throw new Error(`无法解析现有配置文件，已保留原文件: ${configPath}`); }
   }
   data.mcpServers = data.mcpServers && typeof data.mcpServers === 'object' ? data.mcpServers : {};
   data.mcpServers['bitget-morph-wallet'] = { command: 'node', args: [bridgeServer] };
-  mkdirSync(dirname(claudeConfig), { recursive: true });
-  writeFileSync(claudeConfig, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-  log(`Claude Code MCP 已配置: ${claudeConfig}`);
+  writeFileSync(configPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 }
 
-function installBridge() {
+function configureClient(client, skillPath) {
+  const bridgeServer = join(skillPath, 'wallet-bridge', 'server.mjs');
+  if (client.format === 'toml') configureToml(client.config, bridgeServer);
+  else configureJson(client.config, bridgeServer);
+  log(`${client.name} 技能和 MCP 已配置: ${client.config}`);
+}
+
+function installBridgeAt(skillPath) {
+  const bridgeDir = join(skillPath, 'wallet-bridge');
   if (process.platform === 'win32') {
     execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm ci --ignore-scripts --no-audit --no-fund'], {
       cwd: bridgeDir,
@@ -61,31 +78,26 @@ function installBridge() {
   }
 }
 
-function installSkillForDetectedAgents() {
-  if (process.env.BITGET_SKIP_SKILLS_CLI === '1') return;
-  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  try {
-    execFileSync(npx, [
-      '--yes', 'skills', 'add', 'Lappo-Bitget/bitget-skills-hub',
-      '--skill', 'bitget-agentic-wallet', '--agent', '*', '--copy', '-g', '-y'
-    ], { stdio: 'inherit' });
-    log('技能已分发到检测到的 Agent 客户端。');
-  } catch (error) {
-    log(`skills CLI 分发失败，将继续使用 Codex 本地安装: ${error.message}`);
-  }
-}
-
 if (process.argv.includes('--help')) {
-  log('一站式安装 Bitget Agent Skill、WalletConnect bridge，并配置 Codex MCP。');
-  log('环境变量 BITGET_CONFIGURE_CLAUDE=1 可同时写入 Claude Code 的 ~/.claude.json。');
+  log('一站式安装 Bitget Agent Skill、WalletConnect bridge，并配置本机已检测到的 Codex、Claude Code、Cursor、Windsurf、Gemini CLI 和 Cline。');
   process.exit(0);
 }
 if (!existsSync(sourceSkill)) throw new Error(`找不到技能源文件: ${sourceSkill}`);
-installSkillForDetectedAgents();
-mkdirSync(dirname(targetSkill), { recursive: true });
-cpSync(sourceSkill, targetSkill, { recursive: true, force: true });
-log(`技能已安装: ${targetSkill}`);
-installBridge();
-configureCodex();
-if (process.env.BITGET_CONFIGURE_CLAUDE === '1' || existsSync(join(home, '.claude.json'))) configureClaudeCode();
-log(`完成。重启智能体后输入“连接我的 Bitget Wallet”即可显示二维码。`);
+const agentOption = process.argv.find(argument => argument.startsWith('--agent='));
+const requestedAgents = agentOption?.slice('--agent='.length).split(',').map(value => value.trim().toLowerCase());
+const selectedClients = requestedAgents?.length
+  ? clients.filter(client => requestedAgents.includes(client.name.toLowerCase().replaceAll(' ', '-')))
+  : clients.filter(client => client.detect());
+if (requestedAgents?.length && selectedClients.length !== requestedAgents.length) {
+  throw new Error(`不支持的 Agent 名称: ${requestedAgents.filter(name => !clients.some(client => client.name.toLowerCase().replaceAll(' ', '-') === name)).join(', ')}`);
+}
+if (!selectedClients.length) selectedClients.push(clients[0]);
+for (const client of selectedClients) {
+  const skillPath = join(client.skillDir, 'bitget-agentic-wallet');
+  mkdirSync(client.skillDir, { recursive: true });
+  cpSync(sourceSkill, skillPath, { recursive: true, force: true });
+  log(`技能已安装到 ${client.name}: ${skillPath}`);
+  installBridgeAt(skillPath);
+  configureClient(client, skillPath);
+}
+log('完成。重启已配置的智能体，然后输入“连接我的 Bitget Wallet”即可显示二维码。');
