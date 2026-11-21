@@ -32,6 +32,7 @@ const PROJECT_ID = process.env.WALLETCONNECT_PROJECT_ID || '8c4660c0aeaeebdec859
 const DAPP_URL = 'https://morph-agent-id.pages.dev/';
 let provider = null;
 let pairingPromise = null;
+let pairingQr = null;
 let walletMode = 'light';
 
 const server = new McpServer({ name: 'bitget-wallet-morph', version: '0.1.0' });
@@ -79,18 +80,22 @@ server.registerTool('connect_wallet', {
     return textResult(`Already connected: ${status.address} on Morph Mainnet (${status.chainId}).`);
   } catch { /* no active approved session; start pairing */ }
 
-  if (pairingPromise) return textResult('A WalletConnect pairing is already pending. Scan the QR image returned by the first connect_wallet call.');
+  if (pairingPromise) return textResult('A WalletConnect pairing is already pending. Scan this QR with Bitget Wallet.', pairingQr);
   let resolveUri; let rejectUri; let timer;
   const uriReady = new Promise((resolve, reject) => { resolveUri = resolve; rejectUri = reject; });
   const onUri = uri => { if (uri) resolveUri(uri); };
   provider.on('display_uri', onUri);
   pairingPromise = provider.connect().catch(error => { rejectUri(error); throw error; });
-  pairingPromise.catch(() => { pairingPromise = null; });
+  // Clear the pending marker once the session is approved (or fails), while
+  // leaving the generated QR available for retries during the scan window.
+  pairingPromise.then(() => { pairingPromise = null; }, () => { pairingPromise = null; });
   try {
     const uri = await Promise.race([uriReady, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('WalletConnect did not produce a pairing QR within 30 seconds.')), 30000); })]);
     const qr = await QRCode.toBuffer(uri, { type: 'png', width: 420, margin: 2, errorCorrectionLevel: 'M' });
+    pairingQr = qr;
     return textResult('Scan this QR with Bitget Wallet. Approve the WalletConnect request for Morph Mainnet (chain ID 2818). This connects the wallet to this assistant session; the user must separately approve every transaction in the wallet.', qr);
   } catch (error) {
+    pairingQr = null;
     if (provider?.off) provider.off('display_uri', onUri);
     throw error;
   } finally { clearTimeout(timer); }
@@ -101,6 +106,18 @@ server.registerTool('wallet_status', {
   description: 'Return the connected Bitget Wallet address and verify that the wallet is on Morph Mainnet.',
   inputSchema: {}
 }, async () => {
+  if (!provider) return textResult(JSON.stringify({ connected: false, status: 'not_connected', network: 'Morph Mainnet', chainId: CHAIN_ID }));
+  // While the user is still scanning, EthereumProvider.connect() is pending
+  // and request() would throw "Please call connect() before request()". Return
+  // an explicit pending state so the agent does not misreport a failed or
+  // disconnected wallet and does not generate another QR unnecessarily.
+  if (pairingPromise) {
+    const settled = await Promise.race([
+      pairingPromise.then(() => true, () => true),
+      new Promise(resolve => setTimeout(() => resolve(false), 0))
+    ]);
+    if (!settled) return textResult(JSON.stringify({ connected: false, status: 'waiting_scan', network: 'Morph Mainnet', chainId: CHAIN_ID }));
+  }
   const { address, chainId } = await connectedAccount();
   return textResult(JSON.stringify({ connected: true, address, chainId, network: 'Morph Mainnet' }));
 });
@@ -131,6 +148,7 @@ server.registerTool('wallet_disconnect', {
 }, async () => {
   if (provider?.session) await provider.disconnect();
   pairingPromise = null;
+  pairingQr = null;
   walletMode = 'light';
   return textResult('WalletConnect session disconnected from this assistant bridge.');
 });

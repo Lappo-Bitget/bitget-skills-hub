@@ -8,8 +8,8 @@ description: >-
 
 # Bitget Wallet on Morph
 
-This skill uses the local WalletConnect bridge in `wallet-bridge/server.mjs` for
-Bitget Wallet reads and user-approved transactions. In developer mode, the user
+This skill uses the `bitget-morph-wallet` MCP tools for Bitget Wallet reads and
+user-approved transactions. In developer mode, the user
 may choose either Bitget Wallet signing or a local Hardhat signer supplied by a
 platform secret provider. These are separate signing paths; never silently
 switch between them. A WalletConnect session does not grant signing authority.
@@ -86,9 +86,24 @@ the required wallet tool or secure provider is unavailable.
 
 ## Actual workflows
 
-- Connect with `connect_wallet`; ask the user to scan the QR in Bitget Wallet.
-- Verify `wallet_status` reports the approved address and Morph Mainnet (chain
-  ID `2818`).
+- **For a wallet-connection request, start the connection immediately.** Use
+  the runtime's actual `connect_wallet` MCP tool from `bitget-morph-wallet`
+  (in Codex this is `mcp__bitget_morph_wallet__connect_wallet`);
+  do not substitute shell commands, file reads, or a verbal claim that a QR is
+  ready. This is a lightweight wallet action and does not require developer
+  mode. The call returns text and a PNG image. Ensure the image is actually
+  present in the tool result and render it in the conversation before telling
+  the user to scan it. Never say “scan the QR above” when no QR image was
+  returned or rendered.
+- Once the user has scanned, call
+  the `wallet_status` MCP tool and verify it reports the approved address on
+  Morph Mainnet (chain ID `2818`). Do not keep generating
+  replacement QRs while a pairing is pending. If the first tool result lacks an
+  image, is an error, or the tool is unavailable, state that connection has not
+  started and give the concrete error/setup requirement; do not claim that a QR
+  exists. If pairing expires or the user says the QR cannot be scanned, call
+  `mcp__bitget_morph_wallet__connect_wallet` once to create a fresh QR and show
+  the returned image.
 - Use `wallet_read` for the supported read-only JSON-RPC methods.
 - Use `wallet_send_transaction` for a call/transfer. In developer mode, `to` may
   be omitted only for contract creation and the creation bytecode must be shown.
