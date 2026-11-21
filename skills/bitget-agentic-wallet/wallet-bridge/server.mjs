@@ -33,12 +33,18 @@ const DAPP_URL = 'https://morph-agent-id.pages.dev/';
 let provider = null;
 let pairingPromise = null;
 let pairingQr = null;
+let pairingUri = null;
 let walletMode = 'light';
 
 const server = new McpServer({ name: 'bitget-wallet-morph', version: '0.1.0' });
 
 function textResult(text, image) {
-  return { content: [{ type: 'text', text }, ...(image ? [{ type: 'image', data: image.toString('base64'), mimeType: 'image/png' }] : [])] };
+  return {
+    content: [
+      { type: 'text', text },
+      ...(image ? [{ type: 'image', data: image.toString('base64'), mimeType: 'image/png' }] : [])
+    ]
+  };
 }
 function requireProvider() {
   if (!provider) throw new Error('No WalletConnect session. Call connect_wallet first and scan its QR in Bitget Wallet.');
@@ -80,7 +86,10 @@ server.registerTool('connect_wallet', {
     return textResult(`Already connected: ${status.address} on Morph Mainnet (${status.chainId}).`);
   } catch { /* no active approved session; start pairing */ }
 
-  if (pairingPromise) return textResult('A WalletConnect pairing is already pending. Scan this QR with Bitget Wallet.', pairingQr);
+  if (pairingPromise) {
+    const uriText = pairingUri ? `\n\nWalletConnect URI (备用，可复制到 Bitget Wallet)：\n${pairingUri}` : '';
+    return textResult(`A WalletConnect pairing is already pending. Scan this QR with Bitget Wallet.${uriText}`, pairingQr);
+  }
   let resolveUri; let rejectUri; let timer;
   const uriReady = new Promise((resolve, reject) => { resolveUri = resolve; rejectUri = reject; });
   const onUri = uri => { if (uri) resolveUri(uri); };
@@ -91,11 +100,13 @@ server.registerTool('connect_wallet', {
   pairingPromise.then(() => { pairingPromise = null; }, () => { pairingPromise = null; });
   try {
     const uri = await Promise.race([uriReady, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('WalletConnect did not produce a pairing QR within 30 seconds.')), 30000); })]);
-    const qr = await QRCode.toBuffer(uri, { type: 'png', width: 420, margin: 2, errorCorrectionLevel: 'M' });
+    const qr = await QRCode.toBuffer(uri, { type: 'png', width: 1024, margin: 4, errorCorrectionLevel: 'H' });
+    pairingUri = uri;
     pairingQr = qr;
-    return textResult('Scan this QR with Bitget Wallet. Approve the WalletConnect request for Morph Mainnet (chain ID 2818). This connects the wallet to this assistant session; the user must separately approve every transaction in the wallet.', qr);
+    return textResult(`Scan this high-resolution QR with Bitget Wallet. Approve the WalletConnect request for Morph Mainnet (chain ID 2818). This connects the wallet to this assistant session; the user must separately approve every transaction in the wallet.\n\nWalletConnect URI (备用，可复制到 Bitget Wallet)：\n${uri}`, qr);
   } catch (error) {
     pairingQr = null;
+    pairingUri = null;
     if (provider?.off) provider.off('display_uri', onUri);
     throw error;
   } finally { clearTimeout(timer); }
@@ -149,6 +160,7 @@ server.registerTool('wallet_disconnect', {
   if (provider?.session) await provider.disconnect();
   pairingPromise = null;
   pairingQr = null;
+  pairingUri = null;
   walletMode = 'light';
   return textResult('WalletConnect session disconnected from this assistant bridge.');
 });
