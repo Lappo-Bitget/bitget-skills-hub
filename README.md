@@ -1,4 +1,4 @@
-# Morph Agentic Wallet
+# Bitget Skills Hub
 
 Codex Skill for connecting Bitget Wallet to Morph Mainnet through WalletConnect.
 It supports Agent ID reads, read-only Morph RPC queries, user-approved wallet
@@ -10,7 +10,7 @@ skill never accepts a key in chat or provisions one automatically.
 ## Install the skill
 
 ```bash
-npx skills add Lappo-Bitget/morph-agentic-wallet --skill bitget-agentic-wallet -g -y
+npx skills add Lappo-Bitget/bitget-skills-hub --skill bitget-agentic-wallet -g -y
 ```
 
 Use the installed skill with any agent that supports Agent Skills. It can
