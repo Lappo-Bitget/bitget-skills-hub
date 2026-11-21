@@ -29,11 +29,12 @@ function usage() {
   return `Initialize an isolated Hardhat v2 project workflow for Morph
 
 Usage:
+  node <skill>/scripts/init-hardhat-morph.mjs --project-dir <existing-directory> --apply
   node <skill>/scripts/init-hardhat-morph.mjs --project-dir <existing-directory> --plan
-  node <skill>/scripts/init-hardhat-morph.mjs --project-dir <existing-directory> --apply --confirm <plan-code>
 
---plan is read-only. --apply creates only the Morph-scoped files and installs
+--apply initializes immediately: it creates only Morph-scoped files and installs
 missing pinned packages from ${REGISTRY}; it refuses conflicting files or versions.
+--plan is an optional read-only preview. No confirmation code is required.
 `;
 }
 
@@ -42,7 +43,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     if (flag === '--help' || flag === '-h') return { help: true };
-    if (!['--project-dir', '--plan', '--apply', '--confirm'].includes(flag)) {
+    if (!['--project-dir', '--plan', '--apply'].includes(flag)) {
       throw new Error(`Unknown option: ${flag}`);
     }
     if (flag === '--plan' || flag === '--apply') {
@@ -53,15 +54,12 @@ function parseArgs(argv) {
     const value = argv[i + 1];
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${flag}.`);
     i += 1;
-    const key = flag === '--project-dir' ? 'projectDir' : 'confirm';
-    if (options[key]) throw new Error(`${flag} may only be used once.`);
-    options[key] = value;
+    if (options.projectDir) throw new Error(`${flag} may only be used once.`);
+    options.projectDir = value;
   }
   if (!options.projectDir || !options.mode) {
     throw new Error('Provide --project-dir and exactly one of --plan or --apply.');
   }
-  if (options.mode === 'plan' && options.confirm) throw new Error('--confirm is only valid with --apply.');
-  if (options.mode === 'apply' && !options.confirm) throw new Error('--apply requires the confirmation code from the current plan.');
   return options;
 }
 
@@ -184,15 +182,13 @@ async function inspectProject(projectDirInput) {
     missingPackages,
     scriptsToAdd
   };
-  const planCode = `MORPH-HARDHAT-INIT-${createHash('sha256').update(JSON.stringify(plan)).digest('hex').slice(0, 8).toUpperCase()}`;
-  return { projectDir, manifest, lock, plan, planCode, missingPackages };
+  return { projectDir, manifest, lock, plan, missingPackages };
 }
 
 function printPlan(result) {
   console.log('Hardhat Morph setup plan (no files written and no packages installed):');
   console.log(JSON.stringify(result.plan, null, 2));
-  console.log(`Confirmation code: ${result.planCode}`);
-  console.log('Show the target directory, package versions, npm registry, and planned files to the user; obtain explicit confirmation before --apply.');
+  console.log('This preview is optional; --apply runs the same checks and initializes without a setup confirmation code.');
 }
 
 async function writeIfMissing(projectDir, relativePath, content) {
@@ -304,10 +300,6 @@ async function main() {
   if (options.help) return console.log(usage());
   const result = await inspectProject(options.projectDir);
   if (options.mode === 'plan') return printPlan(result);
-  if (options.confirm !== result.planCode) {
-    printPlan(result);
-    throw new Error('Confirmation code does not match the current setup plan. Nothing was installed. Review the plan and obtain fresh user confirmation.');
-  }
   await applySetup(result);
 }
 

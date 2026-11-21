@@ -1,69 +1,49 @@
 # Hardhat deployment on Morph Mainnet
 
-Use this workflow only when the user explicitly chooses local Hardhat signing in
-developer mode. It deploys from a separately configured Morph deployer account;
-it does not use WalletConnect or ask Bitget Wallet to sign the transaction.
+Use this workflow for local Hardhat signing in developer mode. It deploys from
+a host-configured Morph deployer account; it does not use WalletConnect.
 
-## Compatibility boundary
+The skill ships `scripts/morph-hardhat-deploy.mjs`. It consumes a standard
+Hardhat artifact and ethers v6, targets Morph Mainnet chain ID `2818`, uses the
+EIP-2718 BGB AltFee format (`feeTokenID = 4`), and verifies the BGB contract.
 
-The skill ships `scripts/morph-hardhat-deploy.mjs`. It consumes standard
-Hardhat artifact JSON and ethers v6 from the current project's `node_modules`.
-The project must have a working Hardhat compile/test setup and ethers v6
-installed. The helper targets Morph Mainnet only (chain ID 2818), uses Morph's
-EIP-2718 BGB AltFee transaction format (`feeTokenID = 4`), and verifies the BGB
-token contract before deployment.
+An installed skill never provisions or unlocks a key. A host may provide
+`MORPH_DEPLOYER_PRIVATE_KEY` through a trusted secret provider for the short
+lived helper process. Never ask for a key in chat, a terminal prompt, an
+argument, a project `.env`, or a committed file. The helper never prints it.
+`MORPH_DEPLOY_FEE_LIMIT_WEI` defaults to `10000000000000000` (0.01 BGB) and
+can be overridden by the preparation command. `MORPH_RPC_URL` is optional.
 
-An installed skill does not provision or unlock a signing key. Each agent host
-must provide a trusted secret-provider integration that injects
-`MORPH_DEPLOYER_PRIVATE_KEY` only into the short-lived helper process. There is
-no platform-neutral secret-provider API that every agent can call. If the host
-cannot provide this secure environment injection, stop before signing and use
-the Bitget Wallet deployment path instead. Never ask for the key in chat, a
-terminal prompt, command argument, project `.env`, or committed file. Do not
-reuse a key previously pasted in chat. The script intentionally accepts no
-private-key CLI argument and never prints the secret.
+## One-run local preparation
 
-The environment must also set `MORPH_DEPLOY_FEE_LIMIT_WEI` to an explicit BGB
-maximum in wei. `MORPH_RPC_URL` is optional and defaults to the public Morph
-Mainnet RPC. The configured fee cap is checked against the deployer's BGB
-balance and is shown in the plan.
-
-## Build and test
-
-Run these commands from the user's Hardhat project root. Do not copy the
-project's deployment script or secrets into the installed skill.
+From an existing project containing a contract and constructor argument JSON:
 
 ```sh
-npx hardhat compile
-npx hardhat test
-```
-
-Choose the built artifact and write the constructor arguments as a JSON array in
-a project-local file, for example `deploy-args.json`. Values must match the
-artifact ABI; JSON strings can represent Solidity addresses, strings, and
-large integer values. Constructor values become public on-chain data when the
-deployment is broadcast.
-
-## Preview and confirmation
-
-Use the configured host secret provider to inject the deploy key and fee cap
-into each helper invocation; do not print or persist them. Replace the artifact
-path, argument file, and skill path with the actual paths:
-
-```sh
-node "<skill-folder>/scripts/morph-hardhat-deploy.mjs" \
+node "<skill-folder>/scripts/morph-hardhat-prepare.mjs" \
+  --project-dir . \
   --artifact "artifacts/contracts/MyContract.sol/MyContract.json" \
-  --args-file "deploy-args.json" --plan
+  --args-file "deploy-args.json"
 ```
 
-The plan command reads the deploy key only to derive the account address. It
-does not sign or send a transaction. Show the returned plan to the user and
-obtain a clear confirmation in the conversation for that exact plan. The plan
-includes chain ID, deployer, contract and constructor arguments, estimated and
-buffered gas, gas-price fields, BGB fee cap, nonce, and creation-bytecode hash.
+This automatically initializes the pinned toolchain, compiles, tests, detects
+the host secret capability, and prints a deployment plan when available. It
+never signs or broadcasts. If no host secret provider is present, use the
+Bitget Wallet `wallet_deploy_contract` tool after the same build/test checks.
+For the generated Morph configuration, put new Solidity sources in
+`morph-hardhat-contracts/`; the initializer keeps this workflow isolated from
+an existing Hardhat configuration and source tree.
 
-Only after the user confirms, rerun through the same secret provider with the
-displayed confirmation code:
+The fee cap can be set explicitly with `--fee-limit <BGB-wei>`. Constructor
+values become public on-chain data when deployment is broadcast.
+
+## Plan and the single deployment confirmation
+
+The preparation helper's plan includes chain ID, deployer, contract,
+constructor arguments, gas estimate and buffer, gas-price fields, BGB fee cap,
+nonce, and creation-bytecode hash. Show it to the user and obtain one clear
+confirmation in the conversation. Then pass the displayed plan code to the
+helper yourself; do not ask the user to type a code or confirm again in a
+terminal:
 
 ```sh
 node "<skill-folder>/scripts/morph-hardhat-deploy.mjs" \
@@ -71,21 +51,16 @@ node "<skill-folder>/scripts/morph-hardhat-deploy.mjs" \
   --args-file "deploy-args.json" --confirm "MORPH-DEPLOY-2818-XXXXXXXX"
 ```
 
-The helper recomputes the plan before signing. If the account, chain, bytecode,
-constructor data, nonce, gas parameters, or fee cap changed, the confirmation
-code will differ and the helper stops without broadcasting. Present the new
-plan and obtain fresh confirmation before trying again.
+The helper recomputes the plan and aborts before signing if account, chain,
+bytecode, constructor data, nonce, gas, or fee cap changed. The plan code is
+only an internal command argument after the single conversation confirmation;
+it is not an extra interactive prompt.
 
-## Completion checks
+## Completion and unsupported hosts
 
-The helper waits for a receipt, verifies chain ID 2818, successful status,
-contract address, and non-empty runtime bytecode. Report the transaction hash,
-deployed address, and returned Morph Explorer links. A timeout is an unknown
-outcome: check the transaction/receipt before considering any retry. Never
-report deployment success based only on a transaction hash.
-
-The secret-provider adapter is host-specific. Configure it outside the skill
-and make it inject the named environment variable without returning secret
-contents to the agent or logs. Do not claim automatic signing is available on
-Codex, another agent, a cloud runner, or a local machine until that host's
-secret-provider integration has been configured and verified.
+The helper waits for a receipt and verifies chain ID, successful status,
+contract address, and non-empty runtime bytecode before reporting success. A
+timeout is unknown; inspect the transaction before retrying. If neither the
+host secret provider nor the Bitget Wallet wallet tool is available, state that
+the current platform cannot sign a deployment and provide the supported
+Bitget Wallet path; never claim universal one-click signing.

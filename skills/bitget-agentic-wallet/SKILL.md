@@ -14,6 +14,15 @@ may choose either Bitget Wallet signing or a local Hardhat signer supplied by a
 platform secret provider. These are separate signing paths; never silently
 switch between them. A WalletConnect session does not grant signing authority.
 
+When the user asks to build or deploy a contract, enter developer mode and
+start the requested work; do not ask them to repeat a mode-selection step. At
+runtime, inspect available wallet tools and detect whether a trusted host
+secret provider is available. Prefer the Bitget Wallet signer when present;
+otherwise use Hardhat local signing only when the provider is verified. If the
+host exposes neither, clearly state that this platform cannot sign/deploy and
+offer the supported Bitget Wallet flow. A skill cannot install or register a
+wallet integration on every agent platform by itself.
+
 ## Select one operating mode
 
 Choose the mode from the user's request. If the user does not choose a mode,
@@ -28,12 +37,10 @@ show the chain, connected address, destination or deployment target, function,
 calldata/value, token amount, fee token, and expected gas; obtain a fresh clear
 confirmation, then call the wallet tool. Verify the receipt and resulting state.
 
-### Developer mode (explicit opt-in)
+### Developer mode
 
-Use only after the user explicitly asks to enable developer mode for this
-conversation and confirms that they understand it can request arbitrary Morph
-transactions and contract deployments. Developer mode expands the request
-surface to:
+Enable it when the user requests contract development or deployment. This mode
+supports:
 
 - arbitrary contract calls and native/ERC-20 transfers;
 - contract deployment transactions with creation bytecode and constructor data;
@@ -49,31 +56,33 @@ has no secure secret-provider integration, stop before signing and explain that
 this runtime cannot supply the key safely. Do not fall back to chat-pasted
 secrets. Never batch opaque transactions or silently enlarge fee limits.
 
-Before a Hardhat deployment, compile and run the project's tests, then produce
-and show a deployment plan containing chain ID, derived deployer address,
-contract name, constructor arguments, gas limit, fee token and maximum fee cap,
-and creation-bytecode hash. Obtain the user's clear confirmation in the
-conversation for that exact plan before running the signing/deployment step.
-The helper requires a matching plan confirmation code, so changed inputs or
-fees invalidate the approval. After broadcast, verify the chain ID, successful
-receipt, contract address, and deployed code before reporting success. Read
-[references/hardhat-morph.md](references/hardhat-morph.md) for the workflow and
-secret-provider compatibility contract.
+On first deployment, automatically initialize the project, install the pinned
+dependencies, compile, run tests, and prepare the plan. Do not ask for a
+separate initializer plan code or terminal confirmation. Inspect the checked-in
+initializer source before running it; it pins dependencies, uses the public npm
+registry, and disables package lifecycle scripts. Present the deployment plan
+and obtain one clear confirmation in the conversation immediately before
+signing/broadcast. After that confirmation, invoke the helper with the plan
+code yourself; never ask the user to type the code or confirm again in a
+terminal. The helper recomputes the plan, so changed inputs or fees abort
+safely. Verify the
+receipt, deployed address, and code before reporting success. Read
+[references/hardhat-morph.md](references/hardhat-morph.md) and
+[references/hardhat-init.md](references/hardhat-init.md).
 
-To prepare a user's project, use `scripts/init-hardhat-morph.mjs`. Run its
-read-only `--plan` first. Only after the user confirms the exact target path,
-package versions, npm registry, and files shown in that plan may you rerun it
-with `--apply --confirm <plan-code>`. The initializer is idempotent, never
-overwrites existing source/config files, and stops on package or lockfile
-version conflicts. Read [references/hardhat-init.md](references/hardhat-init.md)
-before using it. Installing packages from npm is an external side effect and
-must be explicitly confirmed at action time.
+Use `scripts/morph-hardhat-prepare.mjs` for a one-run initialization, compile,
+test, signer detection, and deployment-plan preview. Run
+`scripts/init-hardhat-morph.mjs --project-dir <existing-project> --apply`
+directly only when a blank project needs setup before contract source is ready.
+The optional `--plan` is read-only. Initialization is idempotent, does not
+overwrite files, blocks version conflicts, and uses `npm --ignore-scripts`.
 
-When entering developer mode, state which signing path is selected. For the
-Bitget Wallet path, explain that each transaction is reviewed and signed in the
-wallet. For the Hardhat path, explain that a configured host secret provider
-will supply the deploy key to a local process, and that the exact deployment
-plan must be confirmed in the conversation before signing.
+State which signing path the current platform exposes. Bitget Wallet must still
+show the transaction for user approval inside the wallet app. The single
+conversation confirmation authorizes submission; wallet approval remains the
+wallet's security boundary. For Hardhat, the configured host secret provider
+supplies the key to the local process. Never imply signing works on hosts where
+the required wallet tool or secure provider is unavailable.
 
 ## Actual workflows
 
