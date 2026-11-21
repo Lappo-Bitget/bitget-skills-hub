@@ -86,6 +86,14 @@ the required wallet tool or secure provider is unavailable.
 
 ## Actual workflows
 
+- **Bitget Wallet deployment gate.** When a user asks to deploy a contract and
+  the Bitget Wallet signing path is selected, call
+  `mcp__bitget_morph_wallet__connect_wallet` before reporting that deployment
+  preparation is complete or asking the user to scan. The tool result must
+  contain a PNG `image` item. Render that returned image in the same response.
+  A deployment response must never contain “scan the QR above” unless that
+  image is present in the response. If the MCP tool is unavailable or returns
+  no image, report the concrete setup error and stop the Bitget Wallet flow.
 - **For a wallet-connection request, start the connection immediately.** Use
   the runtime's actual `connect_wallet` MCP tool from `bitget-morph-wallet`
   (in Codex this is `mcp__bitget_morph_wallet__connect_wallet`);

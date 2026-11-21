@@ -1,7 +1,7 @@
 interface:
   display_name: "Bitget Agentic Wallet"
   short_description: "Morph wallet, Agent ID, and Hardhat deployments"
-  default_prompt: "For wallet connection or QR requests, first call mcp__bitget_morph_wallet__connect_wallet and render its returned PNG image; never claim a QR exists without an image. Use $bitget-agentic-wallet in lightweight mode, or explicitly enable developer mode for a reviewed Bitget Wallet or Hardhat deployment."
+  default_prompt: "For wallet connection or Bitget Wallet deployment requests, first call mcp__bitget_morph_wallet__connect_wallet and render its returned PNG image. Never claim a QR exists without an image, and never report Bitget Wallet deployment preparation as complete until the image is present. Use $bitget-agentic-wallet in lightweight mode, or explicitly enable developer mode for a reviewed Bitget Wallet or Hardhat deployment."
 policy:
   allow_implicit_invocation: true
 dependencies:
