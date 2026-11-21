@@ -10,7 +10,7 @@ skill never accepts a key in chat or provisions one automatically.
 ## Install the skill
 
 ```bash
-npx skills add Lappo-Bitget/bitget-skills-hub --skill bitget-agentic-wallet -g -y
+npx --yes github:Lappo-Bitget/bitget-skills-hub
 ```
 
 Use the installed skill with any agent that supports Agent Skills. It can
@@ -19,22 +19,19 @@ Hardhat workflow. On the first contract deployment it initializes the current
 project automatically; you confirm the exact deployment plan once in the
 conversation. Restart the agent after installation.
 
-The QR connection requires the host to expose the bundled
-`bitget-morph-wallet` MCP bridge. Hosts that honor
-`skills/bitget-agentic-wallet/agents/openai.yaml` can register the bridge from
-the declared dependency. On a host that does not, install the bridge
-dependencies and register this MCP server manually.
+The one-step installer copies the skill to the detected Agent clients, installs
+the WalletConnect bridge dependencies, and registers the
+`bitget-morph-wallet` MCP server for Codex. If Claude Code is installed on the
+same machine, its MCP configuration is updated as well. Restart the agent
+after installation, then ask it to connect Bitget Wallet. It must show the
+returned PNG QR before asking the user to scan.
+
+The original skill-only command remains available for hosts that manage MCP
+servers themselves:
 
 ```bash
-cd <installed-skill>/wallet-bridge
-npm ci --ignore-scripts
+npx skills add Lappo-Bitget/bitget-skills-hub --skill bitget-agentic-wallet -g -y
 ```
-
-Register the command `node <installed-skill>/wallet-bridge/server.mjs` under
-the MCP server name `bitget-morph-wallet`, then restart the agent. Ask the
-agent to connect Bitget Wallet. It must show the returned PNG QR before asking
-the user to scan. Bitget Wallet still requires the user to approve each
-transaction.
 
 ## Network proxy
 

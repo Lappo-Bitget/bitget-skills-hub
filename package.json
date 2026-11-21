@@ -1,0 +1,17 @@
+{
+  "name": "bitget-skills-hub",
+  "version": "0.2.0",
+  "description": "One-step installer for the Bitget Wallet Agent Skill and Morph WalletConnect bridge",
+  "type": "module",
+  "bin": {
+    "bitget-skills-hub": "./install.mjs"
+  },
+  "files": [
+    "install.mjs",
+    "skills",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
