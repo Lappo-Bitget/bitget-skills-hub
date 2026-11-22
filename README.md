@@ -19,14 +19,20 @@ Hardhat workflow. On the first contract deployment it initializes the current
 project automatically; you confirm the exact deployment plan once in the
 conversation. Restart the agent after installation.
 
-The one-step installer copies the skill to detected Agent clients, installs the
-WalletConnect bridge dependencies, and registers the `bitget-morph-wallet` MCP
-server. It handles Codex, Claude Code, Claude Desktop, Cursor, Windsurf,
-Gemini CLI, and Cline when their local configuration directories are present.
-Restart the agent after installation, then ask it to connect Bitget Wallet. It
-must show the returned PNG QR before asking the user to scan. Use
-`--agent=codex`, `--agent=claude-code`, or another supported name to target one
-client explicitly.
+The WalletConnect MCP server source is included in this repository. The
+one-step installer copies the skill and server, installs the server's locked
+dependencies, then registers `bitget-morph-wallet` in detected local clients.
+It handles Codex, Claude Code, Claude Desktop, Cursor, Windsurf, Gemini CLI,
+and Cline when their local configuration directories are present. Restart the
+client after installation, then ask it to connect Bitget Wallet. The client
+loads `connect_wallet` from the registered MCP server and displays its returned
+QR image. Use `--agent=codex`, `--agent=claude-code`, or another supported name
+to target one client explicitly.
+
+This installs a local stdio MCP process. It works with clients that support
+local MCP servers and Agent Skills. A hosted agent that cannot launch local MCP
+processes must provide its own MCP hosting mechanism before it can call the
+wallet tools.
 
 The original skill-only command remains available for hosts that manage MCP
 servers themselves:
