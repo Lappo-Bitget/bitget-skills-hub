@@ -26,7 +26,9 @@ It handles Codex, Claude Code, Claude Desktop, Cursor, Windsurf, Gemini CLI,
 and Cline when their local configuration directories are present. Restart the
 client after installation, then ask it to connect Bitget Wallet. The client
 loads `connect_wallet` from the registered MCP server and displays its returned
-QR image. Use `--agent=codex`, `--agent=claude-code`, or another supported name
+QR image. The bridge also saves the current QR as `walletconnect-qr.png` beside
+the server and returns its absolute path as a client-rendering fallback. Use
+`--agent=codex`, `--agent=claude-code`, or another supported name
 to target one client explicitly.
 
 This installs a local stdio MCP process. It works with clients that support

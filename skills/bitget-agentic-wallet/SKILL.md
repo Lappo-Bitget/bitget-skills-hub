@@ -110,6 +110,9 @@ the required wallet tool or secure provider is unavailable.
   unavailable or fails, still render the QR and show the URI, and state that
   automatic opening failed. Never say “scan the QR above” when no QR image was
   returned or rendered.
+  The bridge also saves the PNG and includes its absolute fallback path in the
+  tool text. If the chat client drops the MCP image block, embed that local PNG
+  with Markdown in the same response so the user can scan it.
 - Once the user has scanned, call
   the `wallet_status` MCP tool and verify it reports the approved address on
   Morph Mainnet (chain ID `2818`). Do not keep generating
