@@ -100,11 +100,16 @@ the required wallet tool or secure provider is unavailable.
   do not substitute shell commands, file reads, or a verbal claim that a QR is
   ready. This is a lightweight wallet action and does not require developer
   mode. The call returns a high-resolution PNG image and a WalletConnect URI.
-  Render the returned image immediately in the same response. Do not ask the
-  user to open another website, copy a URI, or confirm an extra step before
-  showing the image. Keep the URI visible as a copyable fallback in case the
-  client scales or fails to open the image.
-  Never say “scan the QR above” when no QR image was returned or rendered.
+  Immediately open the returned URI with the user's native URI handler, passing
+  it as one argument to an available platform opener. On Windows PowerShell,
+  use `Start-Process -FilePath $uri` with `$uri` assigned directly from the
+  tool result. Do not send the URI through a website. This opens the pairing
+  request but does not approve it. In the same response, render the returned
+  image and show the full URI as copyable text. Do not ask the user to open
+  another website or copy the URI before opening it. If the native opener is
+  unavailable or fails, still render the QR and show the URI, and state that
+  automatic opening failed. Never say “scan the QR above” when no QR image was
+  returned or rendered.
 - Once the user has scanned, call
   the `wallet_status` MCP tool and verify it reports the approved address on
   Morph Mainnet (chain ID `2818`). Do not keep generating
