@@ -33,7 +33,9 @@ function log(message) {
 function configureToml(configPath, bridgeServer) {
   mkdirSync(dirname(configPath), { recursive: true });
   const existing = existsSync(configPath) ? readFileSync(configPath, 'utf8') : '';
-  const block = `[mcp_servers.bitget-morph-wallet]\ncommand = "node"\nargs = [${JSON.stringify(bridgeServer)}]\n`;
+  const proxy = process.env.WALLETCONNECT_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY || process.env.all_proxy;
+  const envLine = proxy ? `env = { WALLETCONNECT_PROXY = ${JSON.stringify(proxy)} }\n` : '';
+  const block = `[mcp_servers.bitget-morph-wallet]\ncommand = "node"\nargs = [${JSON.stringify(bridgeServer)}]\n${envLine}`;
   const header = '[mcp_servers.bitget-morph-wallet]';
   let updated = existing;
   const start = existing.indexOf(header);
@@ -55,7 +57,12 @@ function configureJson(configPath, bridgeServer) {
     catch { throw new Error(`无法解析现有配置文件，已保留原文件: ${configPath}`); }
   }
   data.mcpServers = data.mcpServers && typeof data.mcpServers === 'object' ? data.mcpServers : {};
-  data.mcpServers['bitget-morph-wallet'] = { command: 'node', args: [bridgeServer] };
+  const proxy = process.env.WALLETCONNECT_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY || process.env.all_proxy;
+  data.mcpServers['bitget-morph-wallet'] = {
+    command: 'node',
+    args: [bridgeServer],
+    ...(proxy ? { env: { WALLETCONNECT_PROXY: proxy } } : {})
+  };
   writeFileSync(configPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 }
 

@@ -110,7 +110,7 @@ the required wallet tool or secure provider is unavailable.
   replacement QRs while a pairing is pending. If the first tool result lacks an
   image, is an error, or the tool is unavailable, state that connection has not
   started and give the concrete error/setup requirement; do not claim that a QR
-  exists. If pairing expires or the user says the QR cannot be scanned, call
+  exists or say it is displayed. If pairing expires or the user says the QR cannot be scanned, call
   `mcp__bitget_morph_wallet__connect_wallet` once to create a fresh QR and show
   the returned image.
 - Use `wallet_read` for the supported read-only JSON-RPC methods.

@@ -105,9 +105,16 @@ server.registerTool('connect_wallet', {
     pairingQr = qr;
     return textResult(`Scan this high-resolution QR with Bitget Wallet. Approve the WalletConnect request for Morph Mainnet (chain ID 2818). This connects the wallet to this assistant session; the user must separately approve every transaction in the wallet.\n\nWalletConnect URI (备用，可复制到 Bitget Wallet)：\n${uri}`, qr);
   } catch (error) {
+    pairingPromise = null;
     pairingQr = null;
     pairingUri = null;
     if (provider?.off) provider.off('display_uri', onUri);
+    // Reset an incomplete provider after URI timeout so the next request gets
+    // a fresh WalletConnect pairing instead of reusing a stuck one.
+    if (!provider?.session) {
+      try { await provider?.disconnect(); } catch { /* no active session */ }
+      provider = null;
+    }
     throw error;
   } finally { clearTimeout(timer); }
 });
