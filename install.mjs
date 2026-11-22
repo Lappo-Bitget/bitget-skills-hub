@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync } from 'node
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { detectSystemProxy } from './skills/bitget-agentic-wallet/wallet-bridge/proxy.mjs';
 
 const sourceRoot = dirname(fileURLToPath(import.meta.url));
 const sourceSkill = join(sourceRoot, 'skills', 'bitget-agentic-wallet');
@@ -12,11 +13,12 @@ const home = homedir();
 const roaming = process.env.APPDATA || join(home, 'AppData', 'Roaming');
 const codexHome = process.env.CODEX_HOME || join(home, '.codex');
 const proxyOption = process.argv.find(argument => argument.startsWith('--proxy='))?.slice('--proxy='.length);
-const configuredProxy = proxyOption
+const configuredProxy = (proxyOption && proxyOption !== 'auto' ? proxyOption : null)
   || process.env.WALLETCONNECT_PROXY
   || process.env.HTTPS_PROXY || process.env.https_proxy
   || process.env.HTTP_PROXY || process.env.http_proxy
-  || process.env.ALL_PROXY || process.env.all_proxy;
+  || process.env.ALL_PROXY || process.env.all_proxy
+  || detectSystemProxy();
 const claudeDesktopConfig = process.platform === 'win32'
   ? join(roaming, 'Claude', 'claude_desktop_config.json')
   : process.platform === 'darwin'
@@ -34,6 +36,11 @@ const clients = [
 
 function log(message) {
   process.stdout.write(`[bitget-skills-hub] ${message}\n`);
+}
+
+if (configuredProxy) {
+  const proxyLabel = new URL(configuredProxy);
+  log(`WalletConnect proxy configured: ${proxyLabel.protocol}//${proxyLabel.host}`);
 }
 
 function configureToml(configPath, bridgeServer) {

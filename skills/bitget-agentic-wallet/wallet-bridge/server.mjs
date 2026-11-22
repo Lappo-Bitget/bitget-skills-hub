@@ -4,14 +4,12 @@ import QRCode from 'qrcode';
 import { z } from 'zod';
 import Ws from 'ws';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import { resolveWalletConnectProxy } from './proxy.mjs';
 
 // Keep WalletConnect usable for users with direct internet access. If the
 // environment supplies a proxy, route only WalletConnect's WebSocket relay
 // through it; never assume a machine-specific localhost proxy is present.
-const proxyUrl = process.env.WALLETCONNECT_PROXY
-  || process.env.HTTPS_PROXY || process.env.https_proxy
-  || process.env.HTTP_PROXY || process.env.http_proxy
-  || process.env.ALL_PROXY || process.env.all_proxy;
+const proxyUrl = resolveWalletConnectProxy();
 if (proxyUrl) {
   const parsedProxy = new URL(proxyUrl);
   if (!['http:', 'https:'].includes(parsedProxy.protocol)) {
