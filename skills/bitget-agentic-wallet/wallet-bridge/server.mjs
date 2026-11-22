@@ -41,8 +41,10 @@ const server = new McpServer({ name: 'bitget-wallet-morph', version: '0.1.0' });
 function textResult(text, image) {
   return {
     content: [
-      { type: 'text', text },
-      ...(image ? [{ type: 'image', data: image.toString('base64'), mimeType: 'image/png' }] : [])
+      // Put the QR image first. Some MCP clients render only the first content
+      // block, so returning text first can make a valid pairing appear QR-less.
+      ...(image ? [{ type: 'image', data: image.toString('base64'), mimeType: 'image/png' }] : []),
+      { type: 'text', text }
     ]
   };
 }

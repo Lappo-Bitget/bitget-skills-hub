@@ -99,10 +99,11 @@ the required wallet tool or secure provider is unavailable.
   (in Codex this is `mcp__bitget_morph_wallet__connect_wallet`);
   do not substitute shell commands, file reads, or a verbal claim that a QR is
   ready. This is a lightweight wallet action and does not require developer
-  mode. The call returns text, a WalletConnect URI, and a high-resolution PNG
-  image. Ensure the image is actually present in the tool result and render it
-  in the conversation before telling the user to scan it. Keep the URI visible
-  as a copyable fallback in case the client scales or fails to open the image.
+  mode. The call returns a high-resolution PNG image and a WalletConnect URI.
+  Render the returned image immediately in the same response. Do not ask the
+  user to open another website, copy a URI, or confirm an extra step before
+  showing the image. Keep the URI visible as a copyable fallback in case the
+  client scales or fails to open the image.
   Never say “scan the QR above” when no QR image was returned or rendered.
 - Once the user has scanned, call
   the `wallet_status` MCP tool and verify it reports the approved address on
