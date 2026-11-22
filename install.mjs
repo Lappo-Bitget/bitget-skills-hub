@@ -11,6 +11,12 @@ const sourceSkill = join(sourceRoot, 'skills', 'bitget-agentic-wallet');
 const home = homedir();
 const roaming = process.env.APPDATA || join(home, 'AppData', 'Roaming');
 const codexHome = process.env.CODEX_HOME || join(home, '.codex');
+const proxyOption = process.argv.find(argument => argument.startsWith('--proxy='))?.slice('--proxy='.length);
+const configuredProxy = proxyOption
+  || process.env.WALLETCONNECT_PROXY
+  || process.env.HTTPS_PROXY || process.env.https_proxy
+  || process.env.HTTP_PROXY || process.env.http_proxy
+  || process.env.ALL_PROXY || process.env.all_proxy;
 const claudeDesktopConfig = process.platform === 'win32'
   ? join(roaming, 'Claude', 'claude_desktop_config.json')
   : process.platform === 'darwin'
@@ -33,19 +39,30 @@ function log(message) {
 function configureToml(configPath, bridgeServer) {
   mkdirSync(dirname(configPath), { recursive: true });
   const existing = existsSync(configPath) ? readFileSync(configPath, 'utf8') : '';
-  const proxy = process.env.WALLETCONNECT_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY || process.env.all_proxy;
-  const envLine = proxy ? `env = { WALLETCONNECT_PROXY = ${JSON.stringify(proxy)} }\n` : '';
-  const block = `[mcp_servers.bitget-morph-wallet]\ncommand = "node"\nargs = [${JSON.stringify(bridgeServer)}]\n${envLine}`;
   const header = '[mcp_servers.bitget-morph-wallet]';
-  let updated = existing;
   const start = existing.indexOf(header);
+  let existingEnvLine = '';
   if (start >= 0) {
     const next = existing.indexOf('\n[', start + header.length);
     const end = next >= 0 ? next : existing.length;
-    updated = `${existing.slice(0, start)}${block}${existing.slice(end + (next >= 0 ? 1 : 0))}`;
-  } else {
-    updated = `${existing.trimEnd()}${existing.trim() ? '\n\n' : ''}${block}`;
+    const section = existing.slice(start, end);
+    existingEnvLine = section.split(/\r?\n/).find(line => /^env\s*=/.test(line)) || '';
   }
+  let envLine = existingEnvLine;
+  if (configuredProxy) {
+    const serialized = JSON.stringify(configuredProxy);
+    if (existingEnvLine && /WALLETCONNECT_PROXY\s*=/.test(existingEnvLine)) {
+      envLine = existingEnvLine.replace(/(WALLETCONNECT_PROXY\s*=\s*)"[^"]*"/, `$1${serialized}`);
+    } else if (existingEnvLine && existingEnvLine.includes('{')) {
+      envLine = existingEnvLine.replace(/}\s*$/, `, WALLETCONNECT_PROXY = ${serialized} }`);
+    } else {
+      envLine = `env = { WALLETCONNECT_PROXY = ${serialized} }`;
+    }
+  }
+  const block = `[mcp_servers.bitget-morph-wallet]\ncommand = "node"\nargs = [${JSON.stringify(bridgeServer)}]${envLine ? `\n${envLine}` : ''}\n`;
+  const updated = start >= 0
+    ? `${existing.slice(0, start)}${block}${existing.slice(existing.indexOf('\n[', start + header.length) >= 0 ? existing.indexOf('\n[', start + header.length) + 1 : existing.length)}`
+    : `${existing.trimEnd()}${existing.trim() ? '\n\n' : ''}${block}`;
   if (updated !== existing) writeFileSync(configPath, updated, 'utf8');
 }
 
@@ -57,11 +74,13 @@ function configureJson(configPath, bridgeServer) {
     catch { throw new Error(`无法解析现有配置文件，已保留原文件: ${configPath}`); }
   }
   data.mcpServers = data.mcpServers && typeof data.mcpServers === 'object' ? data.mcpServers : {};
-  const proxy = process.env.WALLETCONNECT_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY || process.env.all_proxy;
+  const previous = data.mcpServers['bitget-morph-wallet'];
+  const env = previous?.env && typeof previous.env === 'object' ? { ...previous.env } : {};
+  if (configuredProxy) env.WALLETCONNECT_PROXY = configuredProxy;
   data.mcpServers['bitget-morph-wallet'] = {
     command: 'node',
     args: [bridgeServer],
-    ...(proxy ? { env: { WALLETCONNECT_PROXY: proxy } } : {})
+    ...(Object.keys(env).length ? { env } : {})
   };
   writeFileSync(configPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 }
