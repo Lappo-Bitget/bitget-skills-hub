@@ -101,8 +101,11 @@ the required wallet tool or secure provider is unavailable.
   ready. This is a lightweight wallet action and does not require developer
   mode. The call returns a high-resolution PNG image and a WalletConnect URI.
   Render the returned PNG in the same response so the user can scan it directly
-  in Bitget Wallet. Do not automatically open the URI, navigate to a website,
-  or make the user open a local QR file. The URI and saved PNG path are fallback
+  in Bitget Wallet. In Codex, when `mcp__codex_app__open_in_codex` is available,
+  immediately open the saved absolute PNG path with target type `file` and
+  placement `right`, keeping the QR visible in the right panel. Do not
+  automatically open the URI, navigate to a website, or make the user open a
+  local QR file. The URI and saved PNG path are fallback
   details only when the client cannot render the image. Never say “scan the QR
   above” unless the QR image is actually present in the response. If the first
   tool result lacks an image, is an error, or the tool is unavailable, state that
