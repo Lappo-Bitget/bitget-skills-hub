@@ -100,28 +100,23 @@ the required wallet tool or secure provider is unavailable.
   do not substitute shell commands, file reads, or a verbal claim that a QR is
   ready. This is a lightweight wallet action and does not require developer
   mode. The call returns a high-resolution PNG image and a WalletConnect URI.
-  Immediately open the returned URI with the user's native URI handler, passing
-  it as one argument to an available platform opener. On Windows PowerShell,
-  use `Start-Process -FilePath $uri` with `$uri` assigned directly from the
-  tool result. Do not send the URI through a website. This opens the pairing
-  request but does not approve it. In the same response, render the returned
-  image and show the full URI as copyable text. Do not ask the user to open
-  another website or copy the URI before opening it. If the native opener is
-  unavailable or fails, still render the QR and show the URI, and state that
-  automatic opening failed. Never say “scan the QR above” when no QR image was
-  returned or rendered.
-  The bridge also saves the PNG and includes its absolute fallback path in the
-  tool text. If the chat client drops the MCP image block, embed that local PNG
-  with Markdown in the same response so the user can scan it.
-- Once the user has scanned, call
-  the `wallet_status` MCP tool and verify it reports the approved address on
-  Morph Mainnet (chain ID `2818`). Do not keep generating
-  replacement QRs while a pairing is pending. If the first tool result lacks an
-  image, is an error, or the tool is unavailable, state that connection has not
-  started and give the concrete error/setup requirement; do not claim that a QR
-  exists or say it is displayed. If pairing expires or the user says the QR cannot be scanned, call
-  `mcp__bitget_morph_wallet__connect_wallet` once to create a fresh QR and show
-  the returned image.
+  Render the returned PNG in the same response so the user can scan it directly
+  in Bitget Wallet. Do not automatically open the URI, navigate to a website,
+  or make the user open a local QR file. The URI and saved PNG path are fallback
+  details only when the client cannot render the image. Never say “scan the QR
+  above” unless the QR image is actually present in the response. If the first
+  tool result lacks an image, is an error, or the tool is unavailable, state that
+  connection has not started and give the concrete error/setup requirement. Do
+  not call `wallet_status` in the same turn as `connect_wallet`.
+- **Wait for explicit user confirmation before checking status.** After the QR
+  response, wait for a later user message that clearly confirms the wallet is
+  connected, such as “确认连接好了”. A message that merely requests
+  connection or says the QR was displayed is not confirmation. Only then call
+  `wallet_status` and verify the approved address on Morph Mainnet (chain ID
+  `2818`). Do not poll, check status proactively, or generate replacement QRs
+  while the pairing is pending. If the user says the QR expired or cannot be
+  scanned, call `connect_wallet` once to create a fresh QR and render it in that
+  response, then wait for confirmation again.
 - Use `wallet_read` for the supported read-only JSON-RPC methods.
 - Use `wallet_send_transaction` for a call/transfer. In developer mode, `to` may
   be omitted only for contract creation and the creation bytecode must be shown.
