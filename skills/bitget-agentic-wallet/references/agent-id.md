@@ -1,7 +1,7 @@
 # Morph Agent ID lookup
 
-Contract: `0xFa7B3c090ae79EAC3BcB814C9f6E0aEf81659240` on Morph Mainnet (chain ID
-`2818`). The DApp is <https://morph-agent-id.pages.dev/>.
+Contract: `0xFa7B3c090ae79EAC3BcB814C9f6E0aEf81659240` on Morph Mainnet. The DApp
+is <https://morph-agent-id.pages.dev/>.
 
 Use `scripts/morph-rpc.mjs custom-id <text>` to check whether a custom ID is
 registered and, if so, report its token ID and current owner. A zero token ID means

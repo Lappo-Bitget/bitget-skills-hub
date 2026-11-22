@@ -115,8 +115,8 @@ the required wallet tool or secure provider is unavailable.
   response, wait for a later user message that clearly confirms the wallet is
   connected, such as “确认连接好了”. A message that merely requests
   connection or says the QR was displayed is not confirmation. Only then call
-  `wallet_status` and verify the approved address on Morph Mainnet (chain ID
-  `2818`). Do not poll, check status proactively, or generate replacement QRs
+  `wallet_status` and verify the approved address on Morph Mainnet. Do not poll,
+  check status proactively, or generate replacement QRs
   while the pairing is pending. If the user says the QR expired or cannot be
   scanned, call `connect_wallet` once to create a fresh QR and render it in that
   response, then wait for confirmation again.
@@ -143,7 +143,7 @@ non-HTTP(S) proxy URLs.
 
 ## Network and project constants
 
-- Morph Mainnet: chain ID `2818` (`0xb02`)
+- Morph Mainnet
 - RPC: `https://rpc-bgw.morph.network`
 - Explorer: <https://explorer.morph.network/>
 - Agent ID ERC-721: `0xFa7B3c090ae79EAC3BcB814C9f6E0aEf81659240`
@@ -154,7 +154,7 @@ non-HTTP(S) proxy URLs.
 ## Read queries and Agent ID
 
 From this skill's directory, run `node scripts/morph-rpc.mjs help`. Confirm the
-reported chain ID is `2818` before interpreting results. Read
+reported network is Morph Mainnet before interpreting results. Read
 [references/agent-id.md](references/agent-id.md) for lookup semantics and
 [references/minting.md](references/minting.md) before a mint or troubleshooting.
 For other wallet operations, read

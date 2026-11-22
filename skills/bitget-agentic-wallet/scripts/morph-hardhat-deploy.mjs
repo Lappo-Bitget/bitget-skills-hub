@@ -110,7 +110,7 @@ function loadSigner(ethers) {
 async function getPlan(ethers, provider, signer, loaded) {
   const network = await provider.getNetwork();
   if (network.chainId !== CHAIN_ID) {
-    throw new Error(`Refusing deployment: RPC chain ID is ${network.chainId}; Morph Mainnet must be ${CHAIN_ID}.`);
+    throw new Error('Refusing deployment: the RPC is not Morph Mainnet.');
   }
 
   const feeLimitText = process.env.MORPH_DEPLOY_FEE_LIMIT_WEI;
@@ -157,7 +157,7 @@ async function getPlan(ethers, provider, signer, loaded) {
   const gasLimit = (estimate * 120n + 99n) / 100n;
 
   const plan = {
-    chainId: CHAIN_ID.toString(),
+    network: 'Morph Mainnet',
     deployer: signer.address,
     contract: loaded.artifact.contractName,
     constructorArgs: loaded.args,
@@ -234,14 +234,14 @@ async function main() {
     }
 
     const before = await provider.getNetwork();
-    if (before.chainId !== CHAIN_ID) throw new Error('RPC chain changed before signing; refusing deployment.');
+    if (before.chainId !== CHAIN_ID) throw new Error('RPC network changed before signing; refusing deployment.');
     const currentNonce = await provider.getTransactionCount(signer.address, 'pending');
     if (currentNonce !== prepared.nonce) throw new Error('Deployer pending nonce changed since the plan was prepared; refusing deployment. Rebuild the plan and obtain fresh confirmation.');
     console.log(`Signing and broadcasting the confirmed Morph deployment from ${signer.address}.`);
     const transactionHash = await signAndBroadcast(ethers, provider, signer, loaded, prepared);
     const receipt = await waitForReceipt(provider, transactionHash);
     const after = await provider.getNetwork();
-    if (after.chainId !== CHAIN_ID) throw new Error(`Receipt was returned by unexpected chain ${after.chainId}; verify manually before reporting success.`);
+    if (after.chainId !== CHAIN_ID) throw new Error('Receipt was returned by an unexpected network; verify manually before reporting success.');
     if (receipt.status !== '0x1' || !receipt.contractAddress) {
       throw new Error(`Deployment receipt failed or has no contract address. Transaction: ${EXPLORER}/tx/${transactionHash}`);
     }
@@ -249,7 +249,7 @@ async function main() {
     if (runtimeCode === '0x') throw new Error(`Receipt has a contract address but no deployed code: ${receipt.contractAddress}`);
     console.log(JSON.stringify({
       deployed: true,
-      chainId: after.chainId.toString(),
+      network: 'Morph Mainnet',
       deployer: signer.address,
       contract: loaded.artifact.contractName,
       contractAddress: receipt.contractAddress,

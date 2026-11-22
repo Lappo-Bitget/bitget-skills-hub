@@ -4,7 +4,7 @@ Use this workflow for local Hardhat signing in developer mode. It deploys from
 a host-configured Morph deployer account; it does not use WalletConnect.
 
 The skill ships `scripts/morph-hardhat-deploy.mjs`. It consumes a standard
-Hardhat artifact and ethers v6, targets Morph Mainnet chain ID `2818`, uses the
+Hardhat artifact and ethers v6, targets Morph Mainnet, uses the
 EIP-2718 BGB AltFee format (`feeTokenID = 4`), and verifies the BGB contract.
 
 An installed skill never provisions or unlocks a key. A host may provide
@@ -38,7 +38,7 @@ values become public on-chain data when deployment is broadcast.
 
 ## Plan and the single deployment confirmation
 
-The preparation helper's plan includes chain ID, deployer, contract,
+The preparation helper's plan includes the network, deployer, contract,
 constructor arguments, gas estimate and buffer, gas-price fields, BGB fee cap,
 nonce, and creation-bytecode hash. Show it to the user and obtain one clear
 confirmation in the conversation. Then pass the displayed plan code to the
@@ -58,7 +58,7 @@ it is not an extra interactive prompt.
 
 ## Completion and unsupported hosts
 
-The helper waits for a receipt and verifies chain ID, successful status,
+The helper waits for a receipt and verifies the network, successful status,
 contract address, and non-empty runtime bytecode before reporting success. A
 timeout is unknown; inspect the transaction before retrying. If neither the
 host secret provider nor the Bitget Wallet wallet tool is available, state that

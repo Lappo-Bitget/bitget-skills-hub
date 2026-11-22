@@ -66,7 +66,7 @@ async function connectedAccount() {
   const accounts = await p.request({ method: 'eth_accounts' });
   if (!Array.isArray(accounts) || !accounts.length) throw new Error('WalletConnect session is not approved. Reconnect with Bitget Wallet.');
   const chainId = BigInt(await p.request({ method: 'eth_chainId' }));
-  if (chainId !== BigInt(CHAIN_ID)) throw new Error(`Wallet is on chain ${chainId}; switch it to Morph Mainnet (2818) in Bitget Wallet.`);
+  if (chainId !== BigInt(CHAIN_ID)) throw new Error('Wallet is not on Morph Mainnet. Switch networks in Bitget Wallet.');
   return { p, address: accounts[0], chainId: Number(chainId) };
 }
 
@@ -94,7 +94,7 @@ server.registerTool('connect_wallet', {
   }
   try {
     const status = await connectedAccount();
-    return textResult(`Already connected: ${status.address} on Morph Mainnet (${status.chainId}).`);
+    return textResult(`Already connected: ${status.address} on Morph Mainnet.`);
   } catch { /* no active approved session; start pairing */ }
 
   if (pairingPromise) {
@@ -120,7 +120,7 @@ server.registerTool('connect_wallet', {
     } catch {
       pairingQrPath = null;
     }
-    return textResult(pairingText(`Scan this high-resolution QR with Bitget Wallet. Approve the WalletConnect request for Morph Mainnet (chain ID 2818). This connects the wallet to this assistant session; the user must separately approve every transaction in the wallet.\n\nWalletConnect URI (备用，可复制到 Bitget Wallet)：\n${uri}`), qr);
+    return textResult(pairingText(`Scan this high-resolution QR with Bitget Wallet. Approve the WalletConnect request for Morph Mainnet. This connects the wallet to this assistant session; the user must separately approve every transaction in the wallet.\n\nWalletConnect URI (备用，可复制到 Bitget Wallet)：\n${uri}`), qr);
   } catch (error) {
     pairingPromise = null;
     pairingQr = null;
@@ -142,7 +142,7 @@ server.registerTool('wallet_status', {
   description: 'Return the connected Bitget Wallet address and verify that the wallet is on Morph Mainnet.',
   inputSchema: {}
 }, async () => {
-  if (!provider) return textResult(JSON.stringify({ connected: false, status: 'not_connected', network: 'Morph Mainnet', chainId: CHAIN_ID }));
+  if (!provider) return textResult(JSON.stringify({ connected: false, status: 'not_connected', network: 'Morph Mainnet' }));
   // While the user is still scanning, EthereumProvider.connect() is pending
   // and request() would throw "Please call connect() before request()". Return
   // an explicit pending state so the agent does not misreport a failed or
@@ -152,10 +152,10 @@ server.registerTool('wallet_status', {
       pairingPromise.then(() => true, () => true),
       new Promise(resolve => setTimeout(() => resolve(false), 0))
     ]);
-    if (!settled) return textResult(JSON.stringify({ connected: false, status: 'waiting_scan', network: 'Morph Mainnet', chainId: CHAIN_ID }));
+    if (!settled) return textResult(JSON.stringify({ connected: false, status: 'waiting_scan', network: 'Morph Mainnet' }));
   }
   const { address, chainId } = await connectedAccount();
-  return textResult(JSON.stringify({ connected: true, address, chainId, network: 'Morph Mainnet' }));
+  return textResult(JSON.stringify({ connected: true, address, network: 'Morph Mainnet' }));
 });
 
 server.registerTool('wallet_set_mode', {
@@ -202,7 +202,7 @@ server.registerTool('wallet_read', {
 }, async ({ method, params }) => {
   const { p, address, chainId } = await connectedAccount();
   const result = await p.request({ method, params });
-  return textResult(JSON.stringify({ method, address, chainId, result }));
+  return textResult(JSON.stringify({ method, address, result }));
 });
 
 server.registerTool('wallet_send_transaction', {
@@ -219,7 +219,7 @@ server.registerTool('wallet_send_transaction', {
   const { p, address, chainId } = await connectedAccount();
   const tx = { from: address, to, data, value, ...(feeTokenID ? { feeTokenID } : {}), ...(feeLimit ? { feeLimit } : {}) };
   const hash = await p.request({ method: 'eth_sendTransaction', params: [tx] });
-  return textResult(JSON.stringify({ submitted: true, hash, ...tx, chainId }));
+  return textResult(JSON.stringify({ submitted: true, hash, ...tx }));
 });
 
 server.registerTool('wallet_deploy_contract', {
@@ -238,7 +238,7 @@ server.registerTool('wallet_deploy_contract', {
   const data = `${bytecode}${constructorData.slice(2)}`;
   const tx = { from: address, data, value, ...(feeTokenID ? { feeTokenID } : {}), ...(feeLimit ? { feeLimit } : {}) };
   const hash = await p.request({ method: 'eth_sendTransaction', params: [tx] });
-  return textResult(JSON.stringify({ submitted: true, hash, ...tx, chainId, mode: walletMode }));
+  return textResult(JSON.stringify({ submitted: true, hash, ...tx, mode: walletMode }));
 });
 
 const transport = new StdioServerTransport();

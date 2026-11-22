@@ -18,8 +18,8 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
 
 ## Capability notes
 
-- **Connect/status:** connect through Bitget Wallet or WalletConnect; show the
-  selected EVM address and Morph chain ID `2818`.
+- **Connect/status:** connect through Bitget Wallet or WalletConnect and show the
+  selected EVM address on Morph Mainnet.
 - **Wallet settings and limits:** inspect only settings/limits exposed by the
   connected wallet. Do not claim Binance-specific quotas, lock controls, or
   security checks exist in Bitget Wallet unless its current interface/tool confirms

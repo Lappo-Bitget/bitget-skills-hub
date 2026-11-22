@@ -8,7 +8,7 @@ a mint failure.
 1. Open <https://morph-agent-id.pages.dev/> and connect the wallet in Bitget Wallet
    or another EVM wallet. For WalletConnect, scan the QR to connect; continue the
    mint flow in the DApp page.
-2. Confirm the wallet is on Morph Mainnet (chain ID `2818`). The connected account
+2. Confirm the wallet is on Morph Mainnet. The connected account
    must not be the project Treasury address
    `0x1e19B97d23c695Bc08772A89c8bDb752B7E0c019`.
 3. Enter a 1–16 character ASCII ID matching `[A-Za-z0-9_-]`. IDs are case-sensitive.

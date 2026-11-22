@@ -63,7 +63,7 @@ function hash(value) {
 }
 async function assertNetwork() {
   const network = await provider.getNetwork();
-  if (network.chainId !== BigInt(CHAIN_ID)) throw new Error(`wrong chain: ${network.chainId}`);
+  if (network.chainId !== BigInt(CHAIN_ID)) throw new Error('wrong network: expected Morph Mainnet');
 }
 async function agentIdsFor(owner) {
   const target = owner.toLowerCase();
@@ -85,7 +85,7 @@ async function main() {
   await assertNetwork();
   if (command === 'network') {
     const [block, fee] = await Promise.all([provider.getBlockNumber(), provider.getFeeData()]);
-    return console.log(JSON.stringify({ rpc: RPC, chainId: CHAIN_ID, block, gasPrice: fee.gasPrice?.toString() ?? null }));
+    return console.log(JSON.stringify({ rpc: RPC, network: 'Morph Mainnet', block, gasPrice: fee.gasPrice?.toString() ?? null }));
   }
   if (command === 'block') {
     const tag = args[0] || 'latest';
