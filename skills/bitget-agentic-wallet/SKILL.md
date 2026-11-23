@@ -174,3 +174,5 @@ For other wallet operations, read
 - A submitted hash is not proof of success. Check the receipt and state; if the
   outcome is unknown, do not retry.
 
+## Morph balance catalog
+When the user selects or asks for a wallet balance query, read native ETH and all ERC-20 assets in the Morph balance catalog. Pin every read to one Morph block. Keep USDC and USDC.e, and USDT0 and USDT.e, as separate balances. Show an individual RPC or token read failure as unavailable and never substitute zero. Keep balances separate from gas estimates and permission-account funds. The full catalog and contract addresses are in [references/wallet-operations.md](references/wallet-operations.md).
