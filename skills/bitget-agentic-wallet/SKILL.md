@@ -121,6 +121,10 @@ the required wallet tool or secure provider is unavailable.
   scanned, call `connect_wallet` once to create a fresh QR and render it in that
   response, then wait for confirmation again.
 - Use `wallet_read` for the supported read-only JSON-RPC methods.
+- For a wallet-balance request, use the connected Morph address and read only
+  ETH, BGB, USDC, USDT0, USDe, USD1, and WETH. Take one block number with
+  `eth_blockNumber` and use that block tag for `eth_getBalance` and every
+  ERC-20 `balanceOf` call. Report failed reads as unavailable, never as zero.
 - Use `wallet_send_transaction` for a call/transfer. In developer mode, `to` may
   be omitted only for contract creation and the creation bytecode must be shown.
 - Use `wallet_deploy_contract` for deployment. It submits a transaction with no
@@ -151,6 +155,34 @@ non-HTTP(S) proxy URLs.
 - Treasury: `0x1e19B97d23c695Bc08772A89c8bDb752B7E0c019`
 - Agent ID mint price: `0.01 BGB`; gas is separate.
 
+## Morph balance catalog
+
+When the user selects or asks for a wallet balance query, include native ETH and
+all ERC-20 contracts below. The list is for read-only balance display. It does
+not add any token to spending or approval presets.
+
+| Asset | Type | Contract | Decimals |
+| --- | --- | --- | ---: |
+| ETH | Native gas asset | Native balance | 18 |
+| USDC | ERC-20 | `0xCfb1186F4e93D60E60a8bDd997427D1F33bc372B` | 6 |
+| USDT0 | ERC-20 | `0xe7cd86e13AC4309349F30B3435a9d337750fC82D` | 6 |
+| USDe | ERC-20 | `0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34` | 18 |
+| USD1 | ERC-20 | `0x111111d2bf19e43C34263401e0CAd979eD1cdb61` | 18 |
+| WETH | ERC-20 | `0x5300000000000000000000000000000000000011` | 18 |
+| BGB | ERC-20 | `0x389C08Bc23A7317000a1FD76c7c5B0cb0b4640b5` | 18 |
+
+## Swap on Morph
+
+Use a verified Morph DEX quote tool for swap requests. The validated route is
+the BulbaSwap aggregator at `https://api.bulbaswap.io` on Morph Mainnet only.
+Get a fresh quote with the connected recipient and show the pair, amount,
+slippage, price impact, route, router, calldata/value, minimum received, and
+expiry before asking for confirmation. Check ERC-20 allowance first and prepare
+an exact approval only when required. Each approval and swap requires a separate
+clear user confirmation and Bitget Wallet review. Query the receipt and resulting
+balances before reporting success. Never use an unverified router, accept a
+private key in chat, or retry an unknown submission.
+
 ## Read queries and Agent ID
 
 From this skill's directory, run `node scripts/morph-rpc.mjs help`. Confirm the
@@ -173,6 +205,3 @@ For other wallet operations, read
   wallet. Never reuse a key pasted in chat or from another task.
 - A submitted hash is not proof of success. Check the receipt and state; if the
   outcome is unknown, do not retry.
-
-## Morph balance catalog
-When the user selects or asks for a wallet balance query, read native ETH and all ERC-20 assets in the Morph balance catalog. Pin every read to one Morph block. Keep USDC and USDC.e, and USDT0 and USDT.e, as separate balances. Show an individual RPC or token read failure as unavailable and never substitute zero. Keep balances separate from gas estimates and permission-account funds. The full catalog and contract addresses are in [references/wallet-operations.md](references/wallet-operations.md).
