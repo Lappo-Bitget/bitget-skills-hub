@@ -80,21 +80,24 @@ state verification.
 
 ## Swap on Morph
 
-Use a verified Morph DEX quote tool for swap requests. The validated route is the
-BulbaSwap aggregator at `https://api.bulbaswap.io` on Morph Mainnet only. Get a
-fresh quote with the connected recipient and show the pair, amount, slippage,
-price impact, route, router, calldata/value, minimum received, and expiry before
-asking for confirmation. Check ERC-20 allowance first and prepare an exact
-approval only when required. Each approval and swap requires a separate clear
-user confirmation and Bitget Wallet review. Query the receipt and resulting
-balances before reporting success. Never use an unverified router, accept a
-private key in chat, or retry an unknown submission.
+Use Bitget Wallet's official Swap API for Morph Mainnet swaps. The API lists
+Morph Chain ID 2818 as supporting Instruction Mode. It requires an API Key and
+API Secret approved for the account. Keep both in server-side Cloudflare Pages
+secrets only. The browser must never receive the API Secret. If credentials or
+Morph access are missing, explain that and do not fall back to an unverified
+router.
 
-The Morph wallet workbench obtains quotes through the same-origin
-`/api/swap-quote` Pages Function because the upstream API does not enable browser
-CORS. Cloudflare Pages deployment must include `functions/api/swap-quote.js`.
-The Swap selector is limited to ETH, BGB, USDC, USDT0, USDe, USD1, and WETH.
-Native ETH is sent as `ETH` to the quote API. ERC-20 assets use their catalog
-contract addresses. The workbench displays the quote and calldata, checks
-allowance, and sends exact approvals and swaps through the connected Bitget
-Wallet after separate user confirmation.
+The Morph workbench calls the same-origin `/api/swap-quote` Pages Function,
+which signs requests to `https://bopenapi.bgwapi.io` with HMAC-SHA256. It requests
+a fresh quote and then calldata, using `morph` as the chain name, the connected
+address as both sender and recipient, smallest-unit integer amounts, the returned
+market, minimum output, and a 300-second deadline. The API represents the native
+token contract as an empty string. The selector is limited to ETH, BGB, USDC,
+USDT0, USDe, USD1, and WETH.
+
+Before the user signs, show the pair, amount, minimum received, slippage, market,
+transaction target, calldata/value, and expiry. Check ERC-20 allowance and
+prepare an exact approval only when required. Each approval and swap requires a
+separate clear user confirmation and Bitget Wallet review. Query the receipt and
+resulting balances before reporting success. Never accept a private key in chat
+or retry an unknown submission.
