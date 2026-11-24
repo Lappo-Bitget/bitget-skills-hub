@@ -7,6 +7,8 @@ import { z } from 'zod';
 import Ws from 'ws';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { resolveWalletConnectProxy } from './proxy.mjs';
+import { getMorphSwapQuote, MORPH_ASSETS } from './bgw-swap.mjs';
+import { randomUUID } from 'node:crypto';
 
 // Keep WalletConnect usable for users with direct internet access. If the
 // environment supplies a proxy, route only WalletConnect's WebSocket relay
@@ -37,6 +39,7 @@ let pairingQr = null;
 let pairingUri = null;
 let pairingQrPath = null;
 let walletMode = 'light';
+const pendingSwapQuotes = new Map();
 try { await unlink(QR_FILE); } catch { /* remove a stale QR from a previous bridge process */ }
 
 const server = new McpServer({ name: 'bitget-wallet-morph', version: '0.1.0' });
@@ -220,6 +223,115 @@ server.registerTool('wallet_send_transaction', {
   const tx = { from: address, to, data, value, ...(feeTokenID ? { feeTokenID } : {}), ...(feeLimit ? { feeLimit } : {}) };
   const hash = await p.request({ method: 'eth_sendTransaction', params: [tx] });
   return textResult(JSON.stringify({ submitted: true, hash, ...tx }));
+});
+
+async function getSwapQuote(quoteId, address) {
+  const quote = pendingSwapQuotes.get(quoteId);
+  if (!quote) throw new Error('Swap quote not found or already used. Request a fresh quote.');
+  if (quote.expiresAt <= Date.now()) {
+    pendingSwapQuotes.delete(quoteId);
+    throw new Error('Swap quote expired. Request a fresh quote.');
+  }
+  if (quote.address.toLowerCase() !== address.toLowerCase()) {
+    pendingSwapQuotes.delete(quoteId);
+    throw new Error('Wallet account changed. Request a fresh quote.');
+  }
+  return quote;
+}
+
+async function readTokenAllowance(p, tokenAddress, owner, spender) {
+  const addressWord = value => value.slice(2).toLowerCase().padStart(64, '0');
+  const data = `0xdd62ed3e${addressWord(owner)}${addressWord(spender)}`;
+  const result = await p.request({ method: 'eth_call', params: [{ to: tokenAddress, data }, 'latest'] });
+  if (typeof result !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(result)) {
+    throw new Error('Could not verify the input token allowance on Morph.');
+  }
+  return BigInt(result);
+}
+
+server.registerTool('swap_quote', {
+  title: 'Get a Bitget Wallet Morph swap quote',
+  description: 'Request a Morph quote and transaction calldata from Bitget Wallet official Swap API using the local server credentials. This does not submit a transaction. Show the returned pair, amounts, minimum output, slippage, market, target, and value. Keep the quote ID private to this flow and require the user to explicitly confirm any approval or swap before calling the corresponding tool.',
+  inputSchema: {
+    tokenIn: z.enum(['ETH', 'BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
+    tokenOut: z.enum(['ETH', 'BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
+    amount: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
+    slippage: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/).default('1')
+  }
+}, async ({ tokenIn, tokenOut, amount, slippage }) => {
+  const { address } = await connectedAccount();
+  const result = await getMorphSwapQuote({ tokenIn, tokenOut, amount, slippage, address });
+  const quoteId = randomUUID();
+  for (const [id, pending] of pendingSwapQuotes) {
+    if (pending.expiresAt <= Date.now()) pendingSwapQuotes.delete(id);
+  }
+  while (pendingSwapQuotes.size >= 20) pendingSwapQuotes.delete(pendingSwapQuotes.keys().next().value);
+  const expiresAt = Date.now() + Math.min(result.expiresInSeconds, 300) * 1000;
+  pendingSwapQuotes.set(quoteId, { ...result, address, expiresAt });
+  const asset = MORPH_ASSETS[tokenIn];
+  let allowance = null;
+  if (asset.contract) {
+    const { p } = await connectedAccount();
+    allowance = (await readTokenAllowance(p, asset.contract, address, result.transaction.to)).toString();
+  }
+  const amountInRaw = amount.split('.');
+  const exactInputAmount = BigInt(amountInRaw[0] + (amountInRaw[1] || '').padEnd(asset.decimals, '0')).toString();
+  return textResult(JSON.stringify({
+    ...result,
+    quoteId,
+    expiresAt: new Date(expiresAt).toISOString(),
+    spender: asset.contract ? result.transaction.to : null,
+    exactInputAmount,
+    allowance,
+    approvalRequired: allowance !== null && BigInt(allowance) < BigInt(exactInputAmount)
+  }));
+});
+
+server.registerTool('swap_approve', {
+  title: 'Request exact token approval for a swap',
+  description: 'Prepare an exact ERC-20 allowance for a previously displayed Bitget Wallet quote. Call only after showing token, exact amount, spender, Morph network, and fees and receiving the user’s clear confirmation. Bitget Wallet still asks the user to sign. A fresh quote is required after approval.',
+  inputSchema: { quoteId: z.string().uuid() }
+}, async ({ quoteId }) => {
+  const { p, address } = await connectedAccount();
+  const quote = await getSwapQuote(quoteId, address);
+  const asset = MORPH_ASSETS[quote.tokenIn];
+  if (!asset.contract) throw new Error('Native ETH does not require token approval.');
+  const exactAmount = BigInt(quote.transaction.value === '0' ? quote.amount.split('.')[0] + (quote.amount.split('.')[1] || '').padEnd(asset.decimals, '0') : '0');
+  if (exactAmount <= 0n) throw new Error('Invalid exact approval amount in the saved quote.');
+  const allowance = await readTokenAllowance(p, asset.contract, address, quote.transaction.to);
+  if (allowance >= exactAmount) throw new Error('Allowance is already sufficient. Request a fresh quote.');
+  const data = `0x095ea7b3${quote.transaction.to.slice(2).toLowerCase().padStart(64, '0')}${exactAmount.toString(16).padStart(64, '0')}`;
+  pendingSwapQuotes.delete(quoteId);
+  const hash = await p.request({
+    method: 'eth_sendTransaction',
+    params: [{ from: address, to: asset.contract, data, value: '0x0' }]
+  });
+  return textResult(JSON.stringify({ submitted: true, type: 'exact_swap_approval', token: quote.tokenIn, spender: quote.transaction.to, amount: quote.amount, hash }));
+});
+
+server.registerTool('swap_execute', {
+  title: 'Request Bitget Wallet swap approval',
+  description: 'Submit the saved Bitget Wallet Morph swap transaction for wallet confirmation. Call only after showing the quote details and receiving the user’s clear confirmation. The quote is one-use and expires. ERC-20 allowance is verified again immediately before the request. Bitget Wallet still asks the user to sign.',
+  inputSchema: { quoteId: z.string().uuid() }
+}, async ({ quoteId }) => {
+  const { p, address } = await connectedAccount();
+  const quote = await getSwapQuote(quoteId, address);
+  const asset = MORPH_ASSETS[quote.tokenIn];
+  if (asset.contract) {
+    const amountParts = quote.amount.split('.');
+    const exactAmount = BigInt(amountParts[0] + (amountParts[1] || '').padEnd(asset.decimals, '0'));
+    const allowance = await readTokenAllowance(p, asset.contract, address, quote.transaction.to);
+    if (allowance < exactAmount) throw new Error('Input token allowance is insufficient. Request a fresh quote and approve the exact amount first.');
+  }
+  pendingSwapQuotes.delete(quoteId);
+  const tx = {
+    from: address,
+    to: quote.transaction.to,
+    data: quote.transaction.data,
+    value: `0x${BigInt(quote.transaction.value).toString(16)}`
+  };
+  const hash = await p.request({ method: 'eth_sendTransaction', params: [tx] });
+  return textResult(JSON.stringify({ submitted: true, type: 'swap', network: 'Morph Mainnet', chainId: 2818, tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amount: quote.amount, estimatedOutput: quote.estimatedOutput, minimumOutput: quote.minimumOutput, market: quote.market, hash, transaction: tx }));
 });
 
 server.registerTool('wallet_deploy_contract', {

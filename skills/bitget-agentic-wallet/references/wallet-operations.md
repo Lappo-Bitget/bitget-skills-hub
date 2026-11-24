@@ -87,17 +87,27 @@ secrets only. The browser must never receive the API Secret. If credentials or
 Morph access are missing, explain that and do not fall back to an unverified
 router.
 
-The Morph workbench calls the same-origin `/api/swap-quote` Pages Function,
-which signs requests to `https://bopenapi.bgwapi.io` with HMAC-SHA256. It requests
-a fresh quote and then calldata, using `morph` as the chain name, the connected
-address as both sender and recipient, smallest-unit integer amounts, the returned
-market, minimum output, and a 300-second deadline. The API represents the native
-token contract as an empty string. The selector is limited to ETH, BGB, USDC,
-USDT0, USDe, USD1, and WETH.
+The local WalletConnect MCP bridge exposes `swap_quote`, `swap_approve`, and
+`swap_execute`. The bridge reads `BGW_API_KEY` and `BGW_API_SECRET` from its
+process environment and signs requests to `https://bopenapi.bgwapi.io` with
+HMAC-SHA256. It requests a fresh quote and then calldata using `morph` as the
+chain name, the connected address as both sender and recipient, smallest-unit
+integer amounts, the returned market, minimum output, and a 300-second deadline.
+The API represents the native token contract as an empty string. The selector is
+limited to ETH, BGB, USDC, USDT0, USDe, USD1, and WETH.
+
+If either credential is missing, stop before requesting a quote and explain how
+to configure the local MCP server environment. Never ask the user to paste a key
+or secret into chat. Restart the client after changing the environment so the
+MCP bridge inherits the new values.
 
 Before the user signs, show the pair, amount, minimum received, slippage, market,
-transaction target, calldata/value, and expiry. Check ERC-20 allowance and
-prepare an exact approval only when required. Each approval and swap requires a
-separate clear user confirmation and Bitget Wallet review. Query the receipt and
-resulting balances before reporting success. Never accept a private key in chat
-or retry an unknown submission.
+transaction target, value, and expiry. The quote tool checks ERC-20 allowance
+and returns a one-use quote ID. If approval is needed, show token, exact amount,
+spender, network, and fees, then wait for clear user confirmation before calling
+`swap_approve`. After the approval receipt succeeds, request a fresh quote. Show
+the new quote details and wait for clear user confirmation before calling
+`swap_execute`. The bridge checks allowance again and the wallet prompts for
+each signature. Query the transaction receipt and resulting balances before
+reporting success. Never accept a private key in chat or retry an unknown
+submission.
