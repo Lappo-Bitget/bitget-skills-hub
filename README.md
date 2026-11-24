@@ -48,22 +48,31 @@ npx skills add Lappo-Bitget/bitget-skills-hub --skill bitget-agentic-wallet -g -
 ## Bitget Wallet official Morph Swap API
 
 The local bridge exposes `swap_quote`, `swap_approve`, and `swap_execute` for
-the official Bitget Wallet Morph Swap API. Configure the credentials in the
-environment inherited by the MCP process before starting the client:
+the official Bitget Wallet Morph Swap API. The bridge calls the shared proxy at
+`https://morph-agent-id.pages.dev/api/swap-quote`, so users installing this
+repository do not need their own BGW API credentials. The owner configures the
+shared API credentials once as Cloudflare Pages Secrets on the `morph-agent-id`
+project:
 
 ```text
 BGW_API_KEY=your_api_key
 BGW_API_SECRET=your_api_secret
 ```
 
-On Windows, add both variables under **User variables** in Windows Environment
-Variables, then fully exit and restart the client so the MCP process inherits
-them. The MCP configuration may also pass them directly in its private local
-`env` section, though the OS credential store is preferable for shared machines.
-Do not paste either value into chat, commit them, or put them in the skill files.
-If the variables are missing, `swap_quote` stops before making a network request.
-The quote is one-use and expires. ERC-20 approval and Swap are separate wallet
-confirmations, and the bridge never bypasses Bitget Wallet signing.
+From the repository's `agent-id-protocol` directory, run these commands in a
+local terminal. Wrangler prompts for each value; enter it directly at the
+terminal prompt. Do not paste it into chat, commit it, or put it in the skill
+files:
+
+```powershell
+npx wrangler pages secret put BGW_API_KEY --project-name morph-agent-id
+npx wrangler pages secret put BGW_API_SECRET --project-name morph-agent-id
+```
+
+If either secret is missing, the proxy returns a configuration error and
+`swap_quote` stops. The quote is one-use and expires. ERC-20 approval and Swap
+are separate wallet confirmations, and the bridge never bypasses Bitget Wallet
+signing.
 
 ## Network proxy
 

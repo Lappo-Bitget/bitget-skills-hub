@@ -181,18 +181,18 @@ Morph access are missing, explain that and do not fall back to an unverified
 router.
 
 The local WalletConnect MCP bridge exposes `swap_quote`, `swap_approve`, and
-`swap_execute`. The bridge reads `BGW_API_KEY` and `BGW_API_SECRET` from its
-process environment and signs requests to `https://bopenapi.bgwapi.io` with
-HMAC-SHA256. It requests a fresh quote and then calldata using `morph` as the
-chain name, the connected address as both sender and recipient, smallest-unit
-integer amounts, the returned market, minimum output, and a 300-second deadline.
-The API represents the native token contract as an empty string. The selector is
-limited to ETH, BGB, USDC, USDT0, USDe, USD1, and WETH.
+`swap_execute`. `swap_quote` calls the shared HTTPS proxy at
+`https://morph-agent-id.pages.dev/api/swap-quote`. The proxy signs requests to
+`https://bopenapi.bgwapi.io` using API credentials stored in Cloudflare Pages
+Secrets. Other users do not need their own API credentials. The API uses `morph`
+as the chain name, the connected address as both sender and recipient,
+smallest-unit integer amounts, the returned market, minimum output, and a
+300-second deadline. The API represents the native token contract as an empty
+string. The selector is limited to ETH, BGB, USDC, USDT0, USDe, USD1, and WETH.
 
-If either credential is missing, stop before requesting a quote and explain how
-to configure the local MCP server environment. Never ask the user to paste a key
-or secret into chat. Restart the client after changing the environment so the
-MCP bridge inherits the new values.
+If the shared proxy reports credentials are not configured or the API rejects
+the account, report that response and stop. Never ask users to paste API
+credentials into chat or local skill files.
 
 Before the user signs, show the pair, amount, minimum received, slippage, market,
 transaction target, value, and expiry. The quote tool checks ERC-20 allowance

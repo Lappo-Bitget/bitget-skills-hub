@@ -1,12 +1,9 @@
-import { createHmac } from 'node:crypto';
-
-const API_BASE = 'https://bopenapi.bgwapi.io';
-const QUOTE_PATH = '/bgw-pro/swapx/pro/quote';
-const SWAP_PATH = '/bgw-pro/swapx/pro/swap';
+const DEFAULT_SWAP_PROXY = 'https://morph-agent-id.pages.dev/api/swap-quote';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const UINT = /^(?:0|[1-9][0-9]*)$/;
 const SLIPPAGE = /^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/;
 const CALLDATA = /^0x(?:[0-9a-fA-F]{2}){4,65536}$/;
+const HEX_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 export const MORPH_ASSETS = Object.freeze({
   ETH: Object.freeze({ contract: '', decimals: 18 }),
@@ -17,15 +14,6 @@ export const MORPH_ASSETS = Object.freeze({
   USD1: Object.freeze({ contract: '0x111111d2bf19e43c34263401e0cad979ed1cdb61', decimals: 18 }),
   WETH: Object.freeze({ contract: '0x5300000000000000000000000000000000000011', decimals: 18 })
 });
-
-function canonicalJson(value) {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    const entries = Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`);
-    return `{${entries.join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
 
 function rawAmount(asset, amount) {
   if (typeof amount !== 'string' || !/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(amount)) {
@@ -58,42 +46,35 @@ function validateSlippage(value) {
   return bps;
 }
 
-async function signedPost(path, body, credentials, fetchImpl) {
-  const timestamp = String(Date.now());
-  const bodyText = JSON.stringify(body);
-  const signedContent = canonicalJson({
-    apiPath: path,
-    body: bodyText,
-    'x-api-key': credentials.apiKey,
-    'x-api-timestamp': timestamp
-  });
-  const signature = createHmac('sha256', credentials.apiSecret).update(signedContent).digest('base64');
+async function requestProxy(body, proxyUrl, fetchImpl) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    const response = await fetchImpl(`${API_BASE}${path}`, {
+    const response = await fetchImpl(proxyUrl, {
       method: 'POST',
       redirect: 'error',
       signal: controller.signal,
       headers: {
         accept: 'application/json',
-        'content-type': 'application/json',
-        'x-api-key': credentials.apiKey,
-        'x-api-timestamp': timestamp,
-        'x-api-signature': signature
+        'content-type': 'application/json'
       },
-      body: bodyText
+      body: JSON.stringify(body)
     });
-    if (!response.ok) throw new Error(`Bitget Wallet Swap API returned HTTP ${response.status}.`);
-    const responseText = await response.text();
-    if (responseText.length > 1048576) throw new Error('Bitget Wallet Swap API response exceeded 1 MiB.');
-    const result = JSON.parse(responseText);
-    if (result?.status !== 0 || !result.data || typeof result.data !== 'object') {
-      throw new Error(result?.msg || result?.message || 'Bitget Wallet Swap API returned an invalid response.');
+    if (!response.ok) {
+      const text = await response.text();
+      let message = `Bitget Wallet Swap proxy returned HTTP ${response.status}.`;
+      try { message = JSON.parse(text)?.error || message; } catch { /* use status message */ }
+      throw new Error(message);
     }
-    return result.data;
+    const responseText = await response.text();
+    if (responseText.length > 1048576) throw new Error('Bitget Wallet Swap response exceeded 1 MiB.');
+    const result = JSON.parse(responseText);
+    if (result?.provider !== 'Bitget Wallet' || !result.quote || !result.transaction) {
+      throw new Error('Bitget Wallet Swap proxy returned an invalid response.');
+    }
+    return result;
   } catch (error) {
-    if (error?.name === 'AbortError') throw new Error('Bitget Wallet Swap API request timed out.');
+    if (error?.name === 'AbortError') throw new Error('Bitget Wallet Swap request timed out.');
     throw error;
   } finally {
     clearTimeout(timer);
@@ -101,69 +82,56 @@ async function signedPost(path, body, credentials, fetchImpl) {
 }
 
 export async function getMorphSwapQuote({ tokenIn, tokenOut, amount, slippage, address }, {
-  apiKey = process.env.BGW_API_KEY,
-  apiSecret = process.env.BGW_API_SECRET,
+  proxyUrl = process.env.BGW_SWAP_PROXY_URL || DEFAULT_SWAP_PROXY,
   fetchImpl = globalThis.fetch
 } = {}) {
-  if (!apiKey || !apiSecret) {
-    throw new Error('Set BGW_API_KEY and BGW_API_SECRET in the local Bitget Wallet MCP server environment.');
-  }
   const input = MORPH_ASSETS[tokenIn];
   const output = MORPH_ASSETS[tokenOut];
   if (!input || !output || tokenIn === tokenOut) throw new Error('Select two different supported Morph assets.');
   if (!ADDRESS.test(address || '') || /^0x0{40}$/i.test(address)) throw new Error('Connected Morph wallet address is invalid.');
-  const bps = validateSlippage(slippage);
+  validateSlippage(slippage);
   const amountWei = rawAmount(input, amount);
-  const common = {
-    fromChain: 'morph',
-    fromContract: input.contract,
-    fromAmount: amountWei,
-    amountUnit: 'wei',
-    fromAddress: address,
-    toAddress: address,
-    toChain: 'morph',
-    toContract: output.contract,
-    estimateGas: true
-  };
+  let parsedProxy;
+  try { parsedProxy = new URL(proxyUrl); } catch { throw new Error('BGW_SWAP_PROXY_URL must be a valid HTTPS URL.'); }
+  if (parsedProxy.protocol !== 'https:') throw new Error('BGW_SWAP_PROXY_URL must use HTTPS.');
 
-  const quote = await signedPost(QUOTE_PATH, common, { apiKey, apiSecret }, fetchImpl);
+  const response = await requestProxy({
+    tokenInAddress: input.contract,
+    tokenOutAddress: output.contract,
+    amount: amountWei,
+    slippage,
+    recipient: address
+  }, parsedProxy.toString(), fetchImpl);
+  const quote = response.quote;
+  const transaction = response.transaction;
   if (quote.estimateRevert === true || typeof quote.market !== 'string' || !quote.market ||
-      typeof quote.toAmount !== 'string' || !UINT.test(quote.toAmount) || quote.toAmount === '0') {
+      typeof quote.toAmount !== 'string' || !UINT.test(quote.toAmount) || quote.toAmount === '0' ||
+      typeof quote.minToAmount !== 'string' || !UINT.test(quote.minToAmount) ||
+      BigInt(quote.minToAmount) <= 0n || BigInt(quote.minToAmount) > BigInt(quote.toAmount)) {
     throw new Error('Bitget Wallet returned a quote that cannot be used safely.');
   }
-  const minimum = BigInt(quote.toAmount) * BigInt(10000 - bps) / 10000n;
-  if (minimum <= 0n) throw new Error('Calculated minimum output is invalid.');
-
-  const swap = await signedPost(SWAP_PATH, {
-    ...common,
-    toMinAmount: minimum.toString(),
-    slippage: Number(slippage),
-    market: quote.market,
-    deadline: 300,
-    requestMod: 'simple'
-  }, { apiKey, apiSecret }, fetchImpl);
-  if (!ADDRESS.test(swap.contract || '') || !CALLDATA.test(swap.calldata || '') ||
-      typeof swap.minToAmount !== 'string' || !UINT.test(swap.minToAmount) ||
-      BigInt(swap.minToAmount) < minimum || BigInt(swap.minToAmount) > BigInt(quote.toAmount)) {
+  if (!HEX_ADDRESS.test(transaction.to || '') || !CALLDATA.test(transaction.data || '') ||
+      typeof transaction.value !== 'string' || !UINT.test(transaction.value) ||
+      transaction.value !== (input.contract === '' ? amountWei : '0')) {
     throw new Error('Bitget Wallet returned invalid swap transaction data.');
   }
 
   return {
-    provider: 'Bitget Wallet Swap API',
+    provider: 'Bitget Wallet Swap API via shared proxy',
     network: 'Morph Mainnet',
     chainId: 2818,
     tokenIn,
     tokenOut,
     amount,
     estimatedOutput: formatAmount(quote.toAmount, output.decimals),
-    minimumOutput: formatAmount(swap.minToAmount, output.decimals),
-    slippage: String(swap.slippage ?? slippage),
+    minimumOutput: formatAmount(quote.minToAmount, output.decimals),
+    slippage: String(quote.slippage ?? slippage),
     market: quote.market,
-    expiresInSeconds: Number(swap.deadline ?? 300),
+    expiresInSeconds: Number(quote.deadline ?? 300),
     transaction: {
-      to: swap.contract,
-      data: swap.calldata,
-      value: input.contract === '' ? amountWei : '0'
+      to: transaction.to,
+      data: transaction.data,
+      value: transaction.value
     }
   };
 }
