@@ -45,6 +45,26 @@ servers themselves:
 npx skills add Lappo-Bitget/bitget-skills-hub --skill bitget-agentic-wallet -g -y
 ```
 
+## Bitget Wallet official Morph Swap API
+
+The local bridge exposes `swap_quote`, `swap_approve`, and `swap_execute` for
+the official Bitget Wallet Morph Swap API. Configure the credentials in the
+environment inherited by the MCP process before starting the client:
+
+```text
+BGW_API_KEY=your_api_key
+BGW_API_SECRET=your_api_secret
+```
+
+On Windows, add both variables under **User variables** in Windows Environment
+Variables, then fully exit and restart the client so the MCP process inherits
+them. The MCP configuration may also pass them directly in its private local
+`env` section, though the OS credential store is preferable for shared machines.
+Do not paste either value into chat, commit them, or put them in the skill files.
+If the variables are missing, `swap_quote` stops before making a network request.
+The quote is one-use and expires. ERC-20 approval and Swap are separate wallet
+confirmations, and the bridge never bypasses Bitget Wallet signing.
+
 ## Network proxy
 
 The installer and bridge detect a configured Windows system HTTP proxy automatically and use it for WalletConnect's WebSocket relay. This keeps the MCP bridge aligned with the proxy used by the desktop wallet and browser.
