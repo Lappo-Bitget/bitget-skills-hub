@@ -262,7 +262,7 @@ function amountToRaw(asset, amount) {
 
 server.registerTool('swap_quote', {
   title: 'Get a Bitget Wallet Morph swap quote',
-  description: 'Request a Morph quote and transaction calldata from Bitget Wallet official Swap API using the local server credentials. This does not submit a transaction. Show the returned pair, amounts, minimum output, slippage, market, target, and value. Keep the quote ID private to this flow and require the user to explicitly confirm any approval or swap before calling the corresponding tool.',
+  description: 'Request a Morph quote and transaction calldata from Bitget Wallet official Swap API using the local server credentials. This does not submit a transaction. Show the returned pair, amounts, minimum output, slippage, market, target, and value. In lightweight mode, get clear confirmation before approval and swap submissions. In developer mode, an active bounded session authorizes in-scope swaps without repeated conversational confirmation, while Bitget Wallet still requires a signature for every transaction.',
   inputSchema: {
     tokenIn: z.enum(['ETH', 'BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
     tokenOut: z.enum(['ETH', 'BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
@@ -326,7 +326,6 @@ server.registerTool('swap_authorize_session', {
     tokenAddress: asset.contract,
     spender: quote.transaction.to,
     maxAmountRaw: maxAmountRaw.toString(),
-    usedAmountRaw: '0',
     durationMinutes,
     approvalHash: hash,
     expiresAt: null
@@ -454,9 +453,11 @@ server.registerTool('swap_execute', {
       if (authorization.expiresAt <= Date.now()) {
         throw new Error('Bounded swap authorization expired. Authorize a new amount cap and duration first.');
       }
-      const usedAmount = BigInt(authorization.usedAmountRaw);
-      const remainingCap = BigInt(authorization.maxAmountRaw) - usedAmount;
-      if (exactAmount > allowance || exactAmount > remainingCap) {
+      const amountCap = BigInt(authorization.maxAmountRaw);
+      if (allowance > amountCap) {
+        throw new Error('On-chain allowance exceeds the active bounded authorization. Revoke it and create a new bounded authorization.');
+      }
+      if (exactAmount > allowance) {
         throw new Error('Swap exceeds the active bounded authorization or remaining on-chain allowance.');
       }
     }
@@ -469,12 +470,6 @@ server.registerTool('swap_execute', {
     value: `0x${BigInt(quote.transaction.value).toString(16)}`
   };
   const hash = await p.request({ method: 'eth_sendTransaction', params: [tx] });
-  if (walletMode === 'developer' && asset.contract) {
-    const authorization = swapAuthorizations.get(`${address.toLowerCase()}:${quote.tokenIn}:${quote.transaction.to.toLowerCase()}`);
-    const amountParts = quote.amount.split('.');
-    const exactAmount = BigInt(amountParts[0] + (amountParts[1] || '').padEnd(asset.decimals, '0'));
-    authorization.usedAmountRaw = (BigInt(authorization.usedAmountRaw) + exactAmount).toString();
-  }
   return textResult(JSON.stringify({ submitted: true, type: 'swap', network: 'Morph Mainnet', chainId: 2818, tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amount: quote.amount, estimatedOutput: quote.estimatedOutput, minimumOutput: quote.minimumOutput, market: quote.market, hash, transaction: tx }));
 });
 
