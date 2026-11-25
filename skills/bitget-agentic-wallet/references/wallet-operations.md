@@ -45,12 +45,14 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
   still needs Bitget Wallet signing on this path.
 - **Local automatic swap sessions:** when the user explicitly requests no
   per-transaction Bitget Wallet approvals, use the separate local signer path.
-  Call `local_signer_setup`, open its loopback URL, and have the user enter a
-  dedicated automation-wallet key directly in that local page. The bridge keeps
-  the key in process memory, applies the selected pair, cumulative cap,
-  per-trade cap, slippage, router, fee, and expiry policy, and signs the first
-  approval plus later swaps locally. The local signer address is distinct from
-  the connected Bitget Wallet address. Its first approval sets the selected
+  Call `local_signer_setup` with no trading parameters, open its loopback URL,
+  and have the user enter a dedicated automation-wallet key directly in that
+  local page. This only configures the signer. Set the trading policy later with
+  `local_signer_policy_set`. The bridge keeps the key in process memory, applies
+  the selected pair, cumulative cap, per-trade cap, slippage, router, fee, and
+  expiry policy, and signs the first approval plus later swaps locally. The
+  local signer address is distinct from the connected Bitget Wallet address.
+  Its first approval sets the selected
   cumulative cap once. Each successful swap consumes the ERC-20 allowance, and
   the quote, execution result, and `local_signer_status` report the remaining
   on-chain allowance. When it reaches zero, stop and require a newly configured

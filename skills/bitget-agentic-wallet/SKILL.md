@@ -225,21 +225,23 @@ wallet, so advise a dedicated wallet with only the funds needed for the policy.
 
 1. Enter developer mode using `wallet_set_mode` and the exact acknowledgement
    required by the tool.
-2. Agree one policy with the user before setup. Show the Morph network, exact
-   token pair, cumulative input cap, per-swap cap, maximum slippage, duration,
-   router restriction, and BGB fee limit. State that the first swap will also
-   sign an ERC-20 approval up to the cumulative cap. The ERC-20 allowance has
-   no on-chain expiry and stays on-chain after the local session expires or the
-   MCP process restarts until spent or revoked.
-3. Call `local_signer_setup` with those policy values. Use
+2. Call `local_signer_setup` with no swap parameters. Use
    `mcp__codex_app__open_in_codex` with the returned loopback URL and target type
    `browser` to open the injection page. The user enters and submits the key
    directly in that page. Never copy the key, inspect it, or send it through
    chat, shell arguments, or another website. If the Codex browser cannot open
    the URL, show the loopback URL so the user can open it locally themselves.
-4. Call `local_signer_status` after the user says setup is complete. Report the
-   independent address and active policy. Do not make a trade until the user
-   issues a concrete swap request.
+3. After the user says setup is complete, call `local_signer_status` and report
+   the independent address. Wallet setup does not set a swap policy, authorize
+   an allowance, or enable trading. Stop here when the user only wants wallet
+   configuration.
+4. Only when the user wants to trade, agree the separate policy. Show the Morph
+   network, exact token pair, cumulative input cap, per-swap cap, maximum
+   slippage, duration, and BGB fee limit. State that the policy duration starts
+   when configured and that the first trade will also approve the cumulative
+   cap. Call `local_signer_policy_set` with the confirmed values. ERC-20
+   allowance has no on-chain expiry and remains after the local policy expires
+   or the MCP process restarts until spent or revoked.
 5. For each requested trade, call `local_swap_quote` and show the quote,
    policy headroom, and remaining allowance. On the first execution, also show
    the router, cumulative allowance, fee cap, expiry, and quote, then call

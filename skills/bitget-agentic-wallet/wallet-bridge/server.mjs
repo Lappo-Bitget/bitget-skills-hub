@@ -93,6 +93,18 @@ function decimalToRaw(asset, amount) {
   return raw;
 }
 
+function buildLocalPolicy({ tokenIn, tokenOut, maxAmount, maxPerTrade, maxSlippage, durationMinutes, feeLimitWei }) {
+  if (tokenIn === tokenOut) throw new Error('The automatic signer needs two different tokens.');
+  const token = MORPH_ASSETS[tokenIn];
+  if (!token?.contract) throw new Error('Automatic swap input must be an ERC-20 token.');
+  const amountCapRaw = decimalToRaw(token, maxAmount);
+  const maxPerTradeRaw = decimalToRaw(token, maxPerTrade);
+  const slippageValue = Number(maxSlippage);
+  if (!Number.isFinite(slippageValue) || slippageValue <= 0 || slippageValue > 50) throw new Error('Maximum slippage must be greater than zero and no more than 50 percent.');
+  if (maxPerTradeRaw > amountCapRaw) throw new Error('Per-trade cap cannot exceed the cumulative amount cap.');
+  return { tokenIn, tokenOut, maxAmount, amountCapRaw: amountCapRaw.toString(), maxPerTrade, maxPerTradeRaw: maxPerTradeRaw.toString(), maxSlippage, durationMinutes, feeLimitWei, spender: null, approvalInitialized: false };
+}
+
 async function readProviderAllowance(provider, tokenAddress, owner, spender) {
   const word = value => value.slice(2).toLowerCase().padStart(64, '0');
   const data = `0xdd62ed3e${word(owner)}${word(spender)}`;
@@ -102,7 +114,10 @@ async function readProviderAllowance(provider, tokenAddress, owner, spender) {
 }
 
 function localSignerPage(token, policy) {
-  return `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"><title>Morph 自动交易钱包</title><style>body{font:16px system-ui;max-width:680px;margin:48px auto;padding:0 20px;color:#222}input,button{font:16px;padding:10px;width:100%;box-sizing:border-box;margin:8px 0}button{cursor:pointer} .warn{background:#fff4ce;padding:14px;border-radius:8px}</style><h1>Morph 自动交易钱包</h1><p class="warn">私钥只提交到本机 127.0.0.1，成功后仅保存在当前 MCP 进程内存，不会写入文件或发送到远程服务。请确认这是一个独立的自动交易钱包私钥，不要使用 Bitget Wallet 私钥。</p><p>兑换对：<b>${policy.tokenIn} → ${policy.tokenOut}</b><br>累计上限：<b>${policy.maxAmount} ${policy.tokenIn}</b><br>单笔上限：<b>${policy.maxPerTrade} ${policy.tokenIn}</b><br>最大滑点：<b>${policy.maxSlippage}%</b><br>有效期：<b>${policy.durationMinutes} 分钟</b><br>单笔 BGB 手续费上限：<b>${policy.feeLimitWei} wei</b></p><p>启用后，范围内交易和首次额度授权都会由此钱包自动签名，不会弹出 Bitget Wallet 审批。首个报价会确定路由器，首次授权交易前还会展示路由器并要求确认。只输入专用自动交易钱包的私钥。</p><form method="post" action="/submit?token=${encodeURIComponent(token)}"><label>自动交易钱包私钥</label><input name="privateKey" type="password" autocomplete="off" required pattern="0x[0-9a-fA-F]{64}"><button type="submit">在本机内存中启用</button></form>`;
+  const policyDetails = policy
+    ? `<p>当前兑换策略：<b>${policy.tokenIn} → ${policy.tokenOut}</b><br>累计上限：<b>${policy.maxAmount} ${policy.tokenIn}</b><br>单笔上限：<b>${policy.maxPerTrade} ${policy.tokenIn}</b><br>最大滑点：<b>${policy.maxSlippage}%</b><br>有效期：<b>${policy.durationMinutes} 分钟</b><br>单笔 BGB 手续费上限：<b>${policy.feeLimitWei} wei</b></p>`
+    : '<p>这里只配置本地钱包。兑换策略将在钱包配置完成后单独设置。</p>';
+  return `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"><title>Morph 自动交易钱包</title><style>body{font:16px system-ui;max-width:680px;margin:48px auto;padding:0 20px;color:#222}input,button{font:16px;padding:10px;width:100%;box-sizing:border-box;margin:8px 0}button{cursor:pointer} .warn{background:#fff4ce;padding:14px;border-radius:8px}</style><h1>Morph 自动交易钱包</h1><p class="warn">私钥只提交到本机 127.0.0.1，成功后仅保存在当前 MCP 进程内存，不会写入文件或发送到远程服务。请确认这是一个独立的自动交易钱包私钥，不要使用 Bitget Wallet 私钥。</p>${policyDetails}<p>提交后只会配置本地签名器，不会授权额度，也不会执行兑换。私钥不会弹出 Bitget Wallet 审批。只输入专用自动交易钱包的私钥。</p><form method="post" action="/submit?token=${encodeURIComponent(token)}"><label>自动交易钱包私钥</label><input name="privateKey" type="password" autocomplete="off" required pattern="0x[0-9a-fA-F]{64}"><button type="submit">在本机内存中启用</button></form>`;
 }
 async function connectedAccount() {
   const p = requireProvider();
@@ -239,32 +254,16 @@ server.registerTool('wallet_disconnect', {
 
 server.registerTool('local_signer_setup', {
   title: 'Open local automatic signer setup',
-  description: 'In acknowledged developer mode, open a loopback-only setup window where the user enters an independent Morph automation-wallet private key. The key is never returned, logged, persisted, or sent to a remote service. The user must set a token pair, cumulative amount cap, duration, and BGB fee limit before automatic signing is enabled.',
-  inputSchema: {
-    tokenIn: z.enum(['BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
-    tokenOut: z.enum(['ETH', 'BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
-    maxAmount: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
-    maxPerTrade: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
-    maxSlippage: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/),
-    durationMinutes: z.number().int().min(1).max(10080),
-    feeLimitWei: z.string().regex(/^[1-9][0-9]*$/).default('10000000000000000')
-  }
-}, async ({ tokenIn, tokenOut, maxAmount, maxPerTrade, maxSlippage, durationMinutes, feeLimitWei }) => {
+  description: 'In acknowledged developer mode, open a loopback-only setup window where the user enters an independent Morph automation-wallet private key. The key is never returned, logged, persisted, or sent to a remote service. This step only configures the signer. Set a swap policy separately with local_signer_policy_set before trading.',
+  inputSchema: {}
+}, async () => {
   if (walletMode !== 'developer') throw new Error('Automatic signing requires acknowledged developer mode.');
   if (localSignerState) throw new Error('A local automatic signer is already configured. Revoke its allowance and disconnect it before replacing the signer.');
-  if (tokenIn === tokenOut) throw new Error('The automatic signer needs two different tokens.');
-  const token = MORPH_ASSETS[tokenIn];
-  if (!token?.contract) throw new Error('Automatic swap input must be an ERC-20 token.');
-  const amountCapRaw = decimalToRaw(token, maxAmount);
-  const maxPerTradeRaw = decimalToRaw(token, maxPerTrade);
-  const slippageValue = Number(maxSlippage);
-  if (!Number.isFinite(slippageValue) || slippageValue <= 0 || slippageValue > 50) throw new Error('Maximum slippage must be greater than zero and no more than 50 percent.');
-  if (maxPerTradeRaw > amountCapRaw) throw new Error('Per-trade cap cannot exceed the cumulative amount cap.');
   if (localSignerServer) throw new Error('A local signer setup window is already open. Submit it or wait for it to expire.');
   const sessionToken = randomBytes(24).toString('hex');
   localSignerSetup = {
     token: sessionToken,
-    policy: { tokenIn, tokenOut, maxAmount, amountCapRaw: amountCapRaw.toString(), maxPerTrade, maxPerTradeRaw: maxPerTradeRaw.toString(), maxSlippage, durationMinutes, feeLimitWei, spender: null, approvalInitialized: false },
+    policy: null,
     expiresAt: Date.now() + 10 * 60 * 1000
   };
   localSignerServer = createServer(async (request, response) => {
@@ -319,7 +318,7 @@ server.registerTool('local_signer_setup', {
           const privateKey = params.get('privateKey') || '';
           const signer = createLocalSigner(privateKey);
           const provider = new JsonRpcProvider(RPC, Number(CHAIN_ID));
-          localSignerState = { signer, provider, policy: localSignerSetup.policy, createdAt: Date.now(), expiresAt: Date.now() + localSignerSetup.policy.durationMinutes * 60 * 1000 };
+          localSignerState = { signer, provider, policy: localSignerSetup.policy, createdAt: Date.now(), expiresAt: localSignerSetup.policy ? Date.now() + localSignerSetup.policy.durationMinutes * 60 * 1000 : null };
           response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
           response.end('<h1>已启用</h1><p>自动交易签名器已在本机内存中启用。可以关闭此窗口。</p>');
           clearTimeout(localSignerSetupTimer);
@@ -364,6 +363,15 @@ server.registerTool('local_signer_status', {
   inputSchema: {}
 }, async () => {
   if (!localSignerState) return textResult(JSON.stringify({ status: 'not_configured' }));
+  if (!localSignerState.policy) {
+    return textResult(JSON.stringify({
+      status: 'configured',
+      address: localSignerState.signer.address,
+      policy: null,
+      expiresAt: null,
+      signingPath: 'local_automatic_signer'
+    }));
+  }
   let pendingApproval = null;
   const approvalHash = localSignerState.policy.pendingApprovalHash;
   if (approvalHash) {
@@ -460,7 +468,7 @@ server.registerTool('local_signer_disconnect', {
   clearTimeout(localSignerSetupTimer);
   localSignerSetupTimer = null;
   localSignerSetup = null;
-  if (localSignerState?.policy.spender) {
+  if (localSignerState?.policy?.spender) {
     const asset = MORPH_ASSETS[localSignerState.policy.tokenIn];
     const allowance = await readProviderAllowance(localSignerState.provider, asset.contract, localSignerState.signer.address, localSignerState.policy.spender);
     if (allowance !== 0n || localSignerState.policy.pendingApprovalHash || localSignerState.policy.pendingRevokeHash || localSignerState.policy.pendingSwapHash) {
@@ -472,12 +480,35 @@ server.registerTool('local_signer_disconnect', {
   });
 });
 
+server.registerTool('local_signer_policy_set', {
+  title: 'Set local signer swap policy',
+  description: 'Attach a bounded swap policy to an already configured local signer. This does not open the key-injection page, create an allowance, or submit a transaction. The policy duration starts when this tool is called.',
+  inputSchema: {
+    tokenIn: z.enum(['BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
+    tokenOut: z.enum(['ETH', 'BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
+    maxAmount: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
+    maxPerTrade: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
+    maxSlippage: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/),
+    durationMinutes: z.number().int().min(1).max(10080),
+    feeLimitWei: z.string().regex(/^[1-9][0-9]*$/).default('10000000000000000')
+  }
+}, async ({ tokenIn, tokenOut, maxAmount, maxPerTrade, maxSlippage, durationMinutes, feeLimitWei }) => {
+  if (walletMode !== 'developer') throw new Error('Automatic signing requires acknowledged developer mode.');
+  const local = requireLocalSigner();
+  if (local.policy) throw new Error('A local swap policy is already set. Revoke any allowance and disconnect the signer before setting a different policy.');
+  const policy = buildLocalPolicy({ tokenIn, tokenOut, maxAmount, maxPerTrade, maxSlippage, durationMinutes, feeLimitWei });
+  local.policy = policy;
+  local.expiresAt = Date.now() + durationMinutes * 60 * 1000;
+  return textResult(JSON.stringify({ status: 'policy_active', address: local.signer.address, policy, expiresAt: new Date(local.expiresAt).toISOString(), signingPath: 'local_automatic_signer', allowanceCreated: false }));
+});
+
 server.registerTool('local_allowance_revoke', {
   title: 'Revoke local automatic-signer allowance',
   description: 'Set the configured local automation wallet ERC-20 allowance for its swap router to zero, wait for the receipt, and verify the on-chain allowance. This broadcasts a transaction with the local signer and does not open Bitget Wallet.',
   inputSchema: {}
 }, async () => serializeLocalSwap(async () => {
   const local = requireLocalSigner();
+  if (!local.policy) throw new Error('No swap policy is configured for this local signer.');
   if (walletMode !== 'developer') throw new Error('Automatic signing is disabled outside developer mode.');
   const { tokenIn, spender, feeLimitWei } = local.policy;
   const asset = MORPH_ASSETS[tokenIn];
@@ -618,6 +649,7 @@ server.registerTool('local_swap_quote', {
   }
 }, async ({ tokenIn, tokenOut, amount, slippage }) => {
   const local = requireLocalSigner();
+  if (!local.policy) throw new Error('No swap policy is configured. Call local_signer_policy_set after the local wallet is ready.');
   if (local.expiresAt <= Date.now()) throw new Error('The local automatic signer policy expired. Configure a new local signer session.');
   if (walletMode !== 'developer') throw new Error('Automatic signing is disabled outside developer mode.');
   if (local.policy.tokenIn !== tokenIn || local.policy.tokenOut !== tokenOut) throw new Error('The swap pair is outside the active automatic signer policy.');
@@ -652,6 +684,7 @@ server.registerTool('local_swap_execute', {
   inputSchema: { quoteId: z.string().uuid(), authorization: z.string().optional() }
 }, async ({ quoteId, authorization }) => serializeLocalSwap(async () => {
   const local = requireLocalSigner();
+  if (!local.policy) throw new Error('No swap policy is configured. Call local_signer_policy_set after the local wallet is ready.');
   if (local.expiresAt <= Date.now()) throw new Error('The local automatic signer policy expired.');
   if (walletMode !== 'developer') throw new Error('Automatic signing is disabled outside developer mode.');
   const quote = await getSwapQuote(quoteId, local.signer.address);
