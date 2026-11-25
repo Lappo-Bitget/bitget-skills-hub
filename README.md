@@ -89,6 +89,18 @@ policy, status, and revoke workflow.
 
 ## Network proxy
 
+## GitHub automatic sync
+
+This checkout uses the tracked `.githooks/post-commit` hook. After each local
+commit on a named branch, it pushes that branch to the `origin` remote. A
+network failure leaves the commit local and prints a retry command. The hook
+does not add or commit files automatically. To enable the same hook after
+cloning this repository, run:
+
+```powershell
+git config core.hooksPath .githooks
+```
+
 The installer and bridge detect a configured Windows system HTTP proxy automatically and use it for WalletConnect's WebSocket relay. This keeps the MCP bridge aligned with the proxy used by the desktop wallet and browser.
 
 On restricted networks, set `WALLETCONNECT_PROXY` to an HTTP(S) proxy URL or pass `--proxy=http://127.0.0.1:7890` to the installer. `HTTPS_PROXY`, `HTTP_PROXY`, and `ALL_PROXY` are also supported. Explicit environment variables and the `--proxy` option take precedence over the system setting.

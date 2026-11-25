@@ -1,0 +1,8 @@
+#!/bin/sh
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || exit 0
+remote=origin
+git remote get-url "$remote" >/dev/null 2>&1 || exit 0
+if ! git push "$remote" "$branch"; then
+  printf '%s\n' "[auto-sync] GitHub push failed. The commit is local and can be pushed later with: git push origin $branch" >&2
+fi
+exit 0
