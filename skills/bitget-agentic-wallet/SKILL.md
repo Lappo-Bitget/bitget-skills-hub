@@ -243,13 +243,15 @@ wallet, so advise a dedicated wallet with only the funds needed for the policy.
 5. For each requested trade, call `local_swap_quote` and show the quote and
    policy headroom. On the first execution, also show the router, cumulative
    allowance, fee cap, expiry, and quote, then call `local_swap_execute` with
-   the exact acknowledgement required by the tool. This first acknowledgement
-   authorizes the bounded local policy. Later user-requested swaps in that
-   policy do not need another BGW popup or per-trade conversational approval.
-   The user must still request each swap. Never trade in the background. Quotes
-   are single-use, short-lived, and consumed before broadcast attempts. If a
-   result is unknown, call `local_signer_status` and inspect the transaction
-   before any new quote or retry.
+   `我确认授权已展示的本地兑换策略、路由器额度授权和本次兑换。` as the
+   `authorization` value only after the user clearly confirms those details.
+   This first acknowledgement authorizes the bounded local policy. Later
+   user-requested swaps in that policy do not need another BGW popup or
+   per-trade conversational approval. The user must still request each swap.
+   Never trade in the background. Quotes are single-use, short-lived, and
+   consumed before broadcast attempts. If a result is unknown, call
+   `local_signer_status` and inspect the transaction before any new quote or
+   retry.
 6. Use `local_signer_status` to resolve pending approval, revoke, or swap
    transactions. Before calling `local_allowance_revoke`, show the token,
    router, current allowance, and fee cap, then obtain clear user confirmation.
