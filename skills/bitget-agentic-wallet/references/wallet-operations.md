@@ -37,11 +37,22 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
   whether an exact or unlimited approval is being prepared. Never enlarge an
   allowance silently.
 - **Developer swap sessions:** after explicit developer-mode acknowledgement,
-  support one bounded ERC-20 allowance with a user-selected cumulative amount
-  cap and duration up to seven days. The bridge enforces the time window and
-  amount cap off-chain while the token contract enforces the allowance. ERC-20
-  allowance has no native expiry, so explain that unused allowance remains
-  until spent or revoked. Every swap transaction still needs wallet signing.
+  the connected Bitget Wallet path supports one bounded ERC-20 allowance with a
+  user-selected cumulative amount cap and duration up to seven days. The bridge
+  enforces the time window and amount cap off-chain while the token contract
+  enforces the allowance. ERC-20 allowance has no native expiry, so explain
+  that unused allowance remains until spent or revoked. Every swap transaction
+  still needs Bitget Wallet signing on this path.
+- **Local automatic swap sessions:** when the user explicitly requests no
+  per-transaction Bitget Wallet approvals, use the separate local signer path.
+  Call `local_signer_setup`, open its loopback URL, and have the user enter a
+  dedicated automation-wallet key directly in that local page. The bridge keeps
+  the key in process memory, applies the selected pair, cumulative cap,
+  per-trade cap, slippage, router, fee, and expiry policy, and signs the first
+  approval plus later swaps locally. The local signer address is distinct from
+  the connected Bitget Wallet address. Call `local_signer_status` for pending
+  transaction resolution and `local_allowance_revoke` to remove the on-chain
+  allowance. Never accept this key in chat or terminal input.
 - **Swaps and quotes:** use a Morph-supported DEX or aggregator only after checking
   live availability, route, slippage, minimum received, and fee. A quote is not an
   order. Support market swaps and limit/trigger orders only when an available Morph
@@ -116,6 +127,7 @@ on-chain expiry, then call `swap_authorize_session` once after clear
 confirmation. Verify it with `swap_authorization_status`. Active sessions may
 submit later quotes for the same token and spender without another
 conversation-level authorization prompt until the cap or time window is
-exhausted. Bitget Wallet still asks the user to sign each transaction. Request
-a fresh quote after approval, verify receipts and resulting balances, and never
-accept a private key in chat or retry an unknown submission.
+exhausted. Bitget Wallet still asks the user to sign each transaction on this
+path. Local automatic sessions require a fresh quote for each user-requested
+swap, consume the quote before broadcast attempts, verify receipts through
+`local_signer_status`, and never retry an unknown submission.

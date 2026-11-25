@@ -2,17 +2,18 @@
 name: bitget-agentic-wallet
 description: >-
   Use for Bitget Wallet operations on Morph Mainnet, including Agent ID reads,
-  lightweight wallet queries, user-approved transactions, and developer-mode
-  Hardhat contract builds and deployments.
+  lightweight wallet queries, user-approved transactions, developer-mode local
+  automatic swaps, and Hardhat contract builds and deployments.
 ---
 
 # Bitget Wallet on Morph
 
 This skill uses the `bitget-morph-wallet` MCP tools for Bitget Wallet reads and
-user-approved transactions. In developer mode, the user
-may choose either Bitget Wallet signing or a local Hardhat signer supplied by a
-platform secret provider. These are separate signing paths; never silently
-switch between them. A WalletConnect session does not grant signing authority.
+user-approved transactions. In developer mode, the user may separately choose
+Bitget Wallet signing, a bounded local automatic swap wallet, or a local
+Hardhat signer supplied by a platform secret provider. These are separate
+signing paths; never silently switch between them. A WalletConnect session does
+not grant signing authority.
 
 When the user asks to build or deploy a contract, enter developer mode and
 start the requested work; do not ask them to repeat a mode-selection step. At
@@ -50,13 +51,14 @@ for repeated swaps under a bounded token-approval session. This mode supports:
 - local Hardhat compile/test and deployment through a configured secret provider.
 
 Developer mode does not mean asking the user to paste a private key or seed
-phrase into chat. For Bitget Wallet signing, each transaction remains reviewed
-and signed in Bitget Wallet. For Hardhat signing, use only the host's configured
-secret provider to inject `MORPH_DEPLOYER_PRIVATE_KEY` into a short-lived
-deployment process; never display, persist, log, or commit it. If the runtime
-has no secure secret-provider integration, stop before signing and explain that
-this runtime cannot supply the key safely. Do not fall back to chat-pasted
-secrets. Never batch opaque transactions or silently enlarge fee limits.
+phrase into chat or a terminal. For Bitget Wallet signing, each transaction
+remains reviewed and signed in Bitget Wallet. For local automatic swaps, use
+the dedicated loopback injection flow below. For Hardhat signing, use only the
+host's configured secret provider to inject `MORPH_DEPLOYER_PRIVATE_KEY` into a
+short-lived deployment process; never display, persist, log, or commit it. If
+the runtime has no supported local signer or secure secret-provider integration,
+stop before signing and explain the limitation. Never batch opaque transactions
+or silently enlarge limits.
 
 On first deployment, automatically initialize the project, install the pinned
 dependencies, compile, run tests, and prepare the plan. Do not ask for a
@@ -80,11 +82,10 @@ The optional `--plan` is read-only. Initialization is idempotent, does not
 overwrite files, blocks version conflicts, and uses `npm --ignore-scripts`.
 
 State which signing path the current platform exposes. Bitget Wallet must still
-show the transaction for user approval inside the wallet app. The single
-conversation confirmation authorizes submission; wallet approval remains the
-wallet's security boundary. For Hardhat, the configured host secret provider
-supplies the key to the local process. Never imply signing works on hosts where
-the required wallet tool or secure provider is unavailable.
+show each transaction for approval inside the wallet app. A local automatic
+swap session instead signs only transactions matching the user-confirmed pair,
+amount limits, slippage, router, fee cap, and expiry. Never imply either path is
+available when its required local MCP tools are unavailable.
 
 ## Actual workflows
 
@@ -134,6 +135,11 @@ the required wallet tool or secure provider is unavailable.
 - For an explicitly selected Hardhat path, follow
   [references/hardhat-morph.md](references/hardhat-morph.md); do not use
   `wallet_deploy_contract` for the same deployment.
+- For a request to trade without per-transaction Bitget Wallet approvals, offer
+  the separate local automatic swap wallet. Explain that it has a different
+  address from the connected Bitget Wallet and that its private key controls
+  that wallet. The wallet must hold the input token and BGB for Morph fees.
+  Never enter the key for the user.
 - After a hash is returned, query the receipt before reporting success. For a
   deployment, verify `contractAddress` and bytecode at that address.
 
@@ -204,22 +210,59 @@ confirmation before calling `swap_approve`. After the approval receipt
 succeeds, request a fresh quote and get separate confirmation before
 `swap_execute`.
 
-In developer mode, the user may authorize one bounded swap session by choosing
-an ERC-20 input token, a maximum cumulative amount, and a duration of up to
-seven days. Show the token, amount cap, spender, network, duration, and the
-fact that ERC-20 allowance has no on-chain expiry. Get clear confirmation once
-before calling `swap_authorize_session`. After its approval receipt succeeds,
-call `swap_authorization_status` to activate and verify the session. During the
-active window, quotes and swaps for that input token and spender may proceed
-without asking again in chat for allowance or swap authorization, as long as
-the amount fits the remaining on-chain allowance. Bitget Wallet still presents
-each transaction for the user to sign. The bridge blocks session use after its
-expiry and enforces the ERC-20 allowance as the cumulative amount cap. Do not
-silently extend the time window, increase the amount cap, or use another token
-or spender. A bridge restart clears the off-chain session, while any unused
-on-chain allowance remains until spent or revoked. Tell the user when it has
-expired and offer `swap_authorization_revoke` for the remaining allowance or
-set up a new session. Revocation also requires a Bitget Wallet signature.
+The standard developer swap session still uses the connected Bitget Wallet.
+Once the user confirms a bounded allowance and duration, the wallet must approve
+that allowance and still signs each Swap transaction. Use
+`swap_authorize_session` and `swap_authorization_status` for that path.
+
+### Local automatic swap wallet
+
+Use this separate path only when the user wants swaps without each transaction
+appearing for approval in Bitget Wallet and the local signer tools are present.
+It creates an independent wallet. Do not describe it as the connected Bitget
+Wallet account. The injected private key gives full control of that independent
+wallet, so advise a dedicated wallet with only the funds needed for the policy.
+
+1. Enter developer mode using `wallet_set_mode` and the exact acknowledgement
+   required by the tool.
+2. Agree one policy with the user before setup. Show the Morph network, exact
+   token pair, cumulative input cap, per-swap cap, maximum slippage, duration,
+   router restriction, and BGB fee limit. State that the first swap will also
+   sign an ERC-20 approval up to the cumulative cap. The ERC-20 allowance has
+   no on-chain expiry and stays on-chain after the local session expires or the
+   MCP process restarts until spent or revoked.
+3. Call `local_signer_setup` with those policy values. Use
+   `mcp__codex_app__open_in_codex` with the returned loopback URL and target type
+   `browser` to open the injection page. The user enters and submits the key
+   directly in that page. Never copy the key, inspect it, or send it through
+   chat, shell arguments, or another website. If the Codex browser cannot open
+   the URL, show the loopback URL so the user can open it locally themselves.
+4. Call `local_signer_status` after the user says setup is complete. Report the
+   independent address and active policy. Do not make a trade until the user
+   issues a concrete swap request.
+5. For each requested trade, call `local_swap_quote` and show the quote and
+   policy headroom. On the first execution, also show the router, cumulative
+   allowance, fee cap, expiry, and quote, then call `local_swap_execute` with
+   the exact acknowledgement required by the tool. This first acknowledgement
+   authorizes the bounded local policy. Later user-requested swaps in that
+   policy do not need another BGW popup or per-trade conversational approval.
+   The user must still request each swap. Never trade in the background. Quotes
+   are single-use, short-lived, and consumed before broadcast attempts. If a
+   result is unknown, call `local_signer_status` and inspect the transaction
+   before any new quote or retry.
+6. Use `local_signer_status` to resolve pending approval, revoke, or swap
+   transactions. Before calling `local_allowance_revoke`, show the token,
+   router, current allowance, and fee cap, then obtain clear user confirmation.
+   Verify the resulting receipt and zero allowance. `local_signer_disconnect`
+   clears the signer from process memory only after the tool verifies there is
+   no nonzero allowance or unresolved transaction.
+
+The private key exists in the bridge process memory only and is not written to
+disk by this flow. The HTTP page binds to `127.0.0.1` on an ephemeral port,
+checks its Host and Origin, sets no-store/security headers, and accepts one
+short-lived form submission. Closing the MCP process clears the in-memory
+signer. The ERC-20 allowance remains on-chain and must be revoked explicitly
+with the local signer or another wallet that controls the same address.
 
 For either mode, request a fresh quote after approval, verify transaction
 receipts and resulting balances, and never accept a private key in chat or retry

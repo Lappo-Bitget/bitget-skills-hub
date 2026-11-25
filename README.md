@@ -4,8 +4,9 @@ Codex Skill for connecting Bitget Wallet to Morph Mainnet through WalletConnect.
 It supports Agent ID reads, read-only Morph RPC queries, user-approved wallet
 transactions, and an explicitly selected local Hardhat build/deploy workflow.
 The WalletConnect path keeps keys and signatures inside Bitget Wallet. The
-Hardhat path is separate and requires a host-configured secret provider; the
-skill never accepts a key in chat or provisions one automatically.
+optional local automatic-swap path uses a separate wallet whose key the user
+enters in a loopback-only local page. The Hardhat path is separate and requires
+a host-configured secret provider. No path accepts keys in chat.
 
 ## Install the skill
 
@@ -74,13 +75,17 @@ If either secret is missing, the proxy returns a configuration error and
 are separate wallet confirmations, and the bridge never bypasses Bitget Wallet
 signing.
 
-For repeated swaps, select the bridge's developer mode and use the bounded swap
-session flow. It authorizes one chosen input token, cumulative amount cap, and
-duration of up to seven days for a specific router spender. The time window is
-enforced by the bridge and the amount cap is enforced by the ERC-20 allowance.
-ERC-20 allowances have no native expiry, so unused allowance remains until it
-is spent or revoked. Bitget Wallet still asks the user to sign every swap
-transaction.
+For repeated swaps, the developer mode offers two separate signing paths. The
+Bitget Wallet path authorizes one chosen input token, cumulative amount cap,
+and duration of up to seven days for a specific router spender. Bitget Wallet
+still asks the user to sign each transaction. The local automatic-swap path
+uses a dedicated wallet injected by the user through a `127.0.0.1` page and
+signs the bounded approval and in-scope swaps locally without BGW popups. The
+user must still request every swap. Both paths enforce a time window in the
+bridge and an input amount cap with an ERC-20 allowance. ERC-20 allowances have
+no native expiry, so unused allowance remains until it is spent or explicitly
+revoked. See `skills/bitget-agentic-wallet/SKILL.md` for the local window,
+policy, status, and revoke workflow.
 
 ## Network proxy
 
@@ -92,9 +97,12 @@ The bridge validates the proxy scheme before starting. It routes only WalletConn
 
 ## Security
 
-The bridge never accepts or exports private keys, seed phrases, or signatures.
-Every WalletConnect transaction is reviewed and signed by the user in Bitget
-Wallet. Hardhat deployment is available only when the host supplies
-`MORPH_DEPLOYER_PRIVATE_KEY` through a trusted secret provider; see
-`skills/bitget-agentic-wallet/references/hardhat-morph.md`. The value is never
-printed, persisted, or committed. Do not paste a key into chat.
+The bridge never accepts keys in chat. The optional local automatic-swap
+signer accepts a dedicated wallet key only through its loopback injection page
+and keeps the signing object in process memory. The user must understand that
+this key controls that wallet and that the bounded ERC-20 allowance has no
+on-chain expiry. WalletConnect transactions remain reviewed and signed in
+Bitget Wallet. Hardhat deployment is available only when the host supplies
+`MORPH_DEPLOYER_PRIVATE_KEY` through a trusted secret provider. The value is
+never printed, persisted, or committed. See
+`skills/bitget-agentic-wallet/references/hardhat-morph.md`.
