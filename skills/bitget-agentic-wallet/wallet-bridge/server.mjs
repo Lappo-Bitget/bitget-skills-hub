@@ -40,6 +40,7 @@ let pairingUri = null;
 let pairingQrPath = null;
 let walletMode = 'light';
 const pendingSwapQuotes = new Map();
+const swapAuthorizations = new Map();
 try { await unlink(QR_FILE); } catch { /* remove a stale QR from a previous bridge process */ }
 
 const server = new McpServer({ name: 'bitget-wallet-morph', version: '0.1.0' });
@@ -177,6 +178,7 @@ server.registerTool('wallet_set_mode', {
     throw new Error('Developer mode requires an explicit acknowledgement that every transaction still requires Bitget Wallet approval.');
   }
   walletMode = mode;
+  if (mode === 'light') swapAuthorizations.clear();
   return textResult(JSON.stringify({ mode: walletMode, signing: 'Bitget Wallet approval required for every transaction' }));
 });
 
@@ -192,6 +194,7 @@ server.registerTool('wallet_disconnect', {
   pairingQrPath = null;
   try { await unlink(QR_FILE); } catch { /* no QR file to remove */ }
   walletMode = 'light';
+  swapAuthorizations.clear();
   return textResult('WalletConnect session disconnected from this assistant bridge.');
 });
 
@@ -249,6 +252,14 @@ async function readTokenAllowance(p, tokenAddress, owner, spender) {
   return BigInt(result);
 }
 
+function amountToRaw(asset, amount) {
+  const [whole, fraction = ''] = amount.split('.');
+  if (fraction.length > asset.decimals) throw new Error(`Amount exceeds ${asset.decimals} decimal places.`);
+  const raw = BigInt(whole + fraction.padEnd(asset.decimals, '0'));
+  if (raw <= 0n) throw new Error('Amount must be greater than zero.');
+  return raw;
+}
+
 server.registerTool('swap_quote', {
   title: 'Get a Bitget Wallet Morph swap quote',
   description: 'Request a Morph quote and transaction calldata from Bitget Wallet official Swap API using the local server credentials. This does not submit a transaction. Show the returned pair, amounts, minimum output, slippage, market, target, and value. Keep the quote ID private to this flow and require the user to explicitly confirm any approval or swap before calling the corresponding tool.',
@@ -287,6 +298,88 @@ server.registerTool('swap_quote', {
   }));
 });
 
+server.registerTool('swap_authorize_session', {
+  title: 'Authorize a bounded swap session',
+  description: 'In acknowledged developer mode, request one bounded ERC-20 allowance for a token and spender from a live quote. Requires clear user confirmation before submission. This creates an off-chain time window and on-chain amount cap. ERC-20 allowance itself does not expire, and every swap transaction still requires Bitget Wallet approval.',
+  inputSchema: {
+    quoteId: z.string().uuid(),
+    maxAmount: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
+    durationMinutes: z.number().int().min(1).max(10080)
+  }
+}, async ({ quoteId, maxAmount, durationMinutes }) => {
+  if (walletMode !== 'developer') throw new Error('A bounded swap authorization requires acknowledged developer mode.');
+  const { p, address } = await connectedAccount();
+  const quote = await getSwapQuote(quoteId, address);
+  const asset = MORPH_ASSETS[quote.tokenIn];
+  if (!asset.contract) throw new Error('Native ETH does not require token approval.');
+  const maxAmountRaw = amountToRaw(asset, maxAmount);
+  const currentAllowance = await readTokenAllowance(p, asset.contract, address, quote.transaction.to);
+  if (currentAllowance > 0n) throw new Error('A token allowance already exists for this spender. Review or revoke it before creating a bounded authorization.');
+  const data = `0x095ea7b3${quote.transaction.to.slice(2).toLowerCase().padStart(64, '0')}${maxAmountRaw.toString(16).padStart(64, '0')}`;
+  const hash = await p.request({
+    method: 'eth_sendTransaction',
+    params: [{ from: address, to: asset.contract, data, value: '0x0' }]
+  });
+  swapAuthorizations.set(`${address.toLowerCase()}:${quote.tokenIn}:${quote.transaction.to.toLowerCase()}`, {
+    address,
+    token: quote.tokenIn,
+    tokenAddress: asset.contract,
+    spender: quote.transaction.to,
+    maxAmountRaw: maxAmountRaw.toString(),
+    usedAmountRaw: '0',
+    durationMinutes,
+    approvalHash: hash,
+    expiresAt: null
+  });
+  pendingSwapQuotes.delete(quoteId);
+  return textResult(JSON.stringify({
+    submitted: true,
+    type: 'bounded_swap_authorization',
+    network: 'Morph Mainnet',
+    token: quote.tokenIn,
+    amountCap: maxAmount,
+    spender: quote.transaction.to,
+    durationMinutes,
+    approvalHash: hash,
+    status: 'awaiting_confirmation'
+  }));
+});
+
+server.registerTool('swap_authorization_status', {
+  title: 'Verify bounded swap authorization',
+  description: 'Check the pending approval receipt and, after confirmation, activate its off-chain time window. The on-chain ERC-20 allowance remains until spent or revoked.',
+  inputSchema: { token: z.enum(['BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']) }
+}, async ({ token }) => {
+  const { p, address } = await connectedAccount();
+  const matches = [...swapAuthorizations.entries()].filter(([, grant]) =>
+    grant.address.toLowerCase() === address.toLowerCase() && grant.token === token
+  );
+  if (!matches.length) throw new Error('No bounded swap authorization is pending for this token and wallet.');
+  const [key, grant] = matches.at(-1);
+  const receipt = await p.request({ method: 'eth_getTransactionReceipt', params: [grant.approvalHash] });
+  if (!receipt) return textResult(JSON.stringify({ status: 'pending', approvalHash: grant.approvalHash }));
+  if (BigInt(receipt.status) !== 1n) {
+    swapAuthorizations.delete(key);
+    return textResult(JSON.stringify({ status: 'failed', approvalHash: grant.approvalHash }));
+  }
+  const allowance = await readTokenAllowance(p, grant.tokenAddress, address, grant.spender);
+  const maxAmount = BigInt(grant.maxAmountRaw);
+  if (allowance < maxAmount) {
+    swapAuthorizations.delete(key);
+    return textResult(JSON.stringify({ status: 'allowance_mismatch', allowance: allowance.toString(), expectedAtLeast: grant.maxAmountRaw }));
+  }
+  if (grant.expiresAt === null) grant.expiresAt = Date.now() + grant.durationMinutes * 60 * 1000;
+  return textResult(JSON.stringify({
+    status: grant.expiresAt > Date.now() ? 'active' : 'expired',
+    token,
+    spender: grant.spender,
+    amountCapRaw: grant.maxAmountRaw,
+    allowanceRemainingRaw: allowance.toString(),
+    expiresAt: new Date(grant.expiresAt).toISOString(),
+    approvalHash: grant.approvalHash
+  }));
+});
+
 server.registerTool('swap_approve', {
   title: 'Request exact token approval for a swap',
   description: 'Prepare an exact ERC-20 allowance for a previously displayed Bitget Wallet quote. Call only after showing token, exact amount, spender, Morph network, and fees and receiving the user’s clear confirmation. Bitget Wallet still asks the user to sign. A fresh quote is required after approval.',
@@ -311,7 +404,7 @@ server.registerTool('swap_approve', {
 
 server.registerTool('swap_execute', {
   title: 'Request Bitget Wallet swap approval',
-  description: 'Submit the saved Bitget Wallet Morph swap transaction for wallet confirmation. Call only after showing the quote details and receiving the user’s clear confirmation. The quote is one-use and expires. ERC-20 allowance is verified again immediately before the request. Bitget Wallet still asks the user to sign.',
+  description: 'Submit the saved Bitget Wallet Morph swap transaction. In lightweight mode, require clear user confirmation for this swap. In developer mode, a currently active bounded swap authorization permits submission without another conversational authorization prompt when the token, spender, duration, and remaining allowance match. Every transaction still requires Bitget Wallet signing.',
   inputSchema: { quoteId: z.string().uuid() }
 }, async ({ quoteId }) => {
   const { p, address } = await connectedAccount();
@@ -322,6 +415,26 @@ server.registerTool('swap_execute', {
     const exactAmount = BigInt(amountParts[0] + (amountParts[1] || '').padEnd(asset.decimals, '0'));
     const allowance = await readTokenAllowance(p, asset.contract, address, quote.transaction.to);
     if (allowance < exactAmount) throw new Error('Input token allowance is insufficient. Request a fresh quote and approve the exact amount first.');
+    if (walletMode === 'developer') {
+      const authorization = swapAuthorizations.get(`${address.toLowerCase()}:${quote.tokenIn}:${quote.transaction.to.toLowerCase()}`);
+      if (!authorization) {
+        throw new Error('No active bounded swap authorization for this token and spender. Authorize a new amount cap and duration first.');
+      }
+      if (authorization.expiresAt === null) {
+        const approvalReceipt = await p.request({ method: 'eth_getTransactionReceipt', params: [authorization.approvalHash] });
+        if (!approvalReceipt) throw new Error('Bounded swap authorization is still awaiting wallet confirmation.');
+        if (BigInt(approvalReceipt.status) !== 1n) throw new Error('Bounded swap authorization failed on-chain.');
+        authorization.expiresAt = Date.now() + authorization.durationMinutes * 60 * 1000;
+      }
+      if (authorization.expiresAt <= Date.now()) {
+        throw new Error('Bounded swap authorization expired. Authorize a new amount cap and duration first.');
+      }
+      const usedAmount = BigInt(authorization.usedAmountRaw);
+      const remainingCap = BigInt(authorization.maxAmountRaw) - usedAmount;
+      if (exactAmount > allowance || exactAmount > remainingCap) {
+        throw new Error('Swap exceeds the active bounded authorization or remaining on-chain allowance.');
+      }
+    }
   }
   pendingSwapQuotes.delete(quoteId);
   const tx = {
@@ -331,6 +444,12 @@ server.registerTool('swap_execute', {
     value: `0x${BigInt(quote.transaction.value).toString(16)}`
   };
   const hash = await p.request({ method: 'eth_sendTransaction', params: [tx] });
+  if (walletMode === 'developer' && asset.contract) {
+    const authorization = swapAuthorizations.get(`${address.toLowerCase()}:${quote.tokenIn}:${quote.transaction.to.toLowerCase()}`);
+    const amountParts = quote.amount.split('.');
+    const exactAmount = BigInt(amountParts[0] + (amountParts[1] || '').padEnd(asset.decimals, '0'));
+    authorization.usedAmountRaw = (BigInt(authorization.usedAmountRaw) + exactAmount).toString();
+  }
   return textResult(JSON.stringify({ submitted: true, type: 'swap', network: 'Morph Mainnet', chainId: 2818, tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amount: quote.amount, estimatedOutput: quote.estimatedOutput, minimumOutput: quote.minimumOutput, market: quote.market, hash, transaction: tx }));
 });
 

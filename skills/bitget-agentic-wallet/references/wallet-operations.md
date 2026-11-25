@@ -36,6 +36,12 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
 - **Approvals:** show token, spender, current allowance, requested allowance, and
   whether an exact or unlimited approval is being prepared. Never enlarge an
   allowance silently.
+- **Developer swap sessions:** after explicit developer-mode acknowledgement,
+  support one bounded ERC-20 allowance with a user-selected cumulative amount
+  cap and duration up to seven days. The bridge enforces the time window and
+  amount cap off-chain while the token contract enforces the allowance. ERC-20
+  allowance has no native expiry, so explain that unused allowance remains
+  until spent or revoked. Every swap transaction still needs wallet signing.
 - **Swaps and quotes:** use a Morph-supported DEX or aggregator only after checking
   live availability, route, slippage, minimum received, and fee. A quote is not an
   order. Support market swaps and limit/trigger orders only when an available Morph
@@ -103,11 +109,13 @@ credentials into chat or local skill files.
 
 Before the user signs, show the pair, amount, minimum received, slippage, market,
 transaction target, value, and expiry. The quote tool checks ERC-20 allowance
-and returns a one-use quote ID. If approval is needed, show token, exact amount,
-spender, network, and fees, then wait for clear user confirmation before calling
-`swap_approve`. After the approval receipt succeeds, request a fresh quote. Show
-the new quote details and wait for clear user confirmation before calling
-`swap_execute`. The bridge checks allowance again and the wallet prompts for
-each signature. Query the transaction receipt and resulting balances before
-reporting success. Never accept a private key in chat or retry an unknown
-submission.
+and returns a one-use quote ID. In lightweight mode, use `swap_approve` only
+after clear confirmation for the exact amount. In developer mode, show the
+chosen input token, spender, cumulative amount cap, duration, and the lack of
+on-chain expiry, then call `swap_authorize_session` once after clear
+confirmation. Verify it with `swap_authorization_status`. Active sessions may
+submit later quotes for the same token and spender without another
+conversation-level authorization prompt until the cap or time window is
+exhausted. Bitget Wallet still asks the user to sign each transaction. Request
+a fresh quote after approval, verify receipts and resulting balances, and never
+accept a private key in chat or retry an unknown submission.

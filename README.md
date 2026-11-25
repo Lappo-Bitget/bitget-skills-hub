@@ -74,6 +74,14 @@ If either secret is missing, the proxy returns a configuration error and
 are separate wallet confirmations, and the bridge never bypasses Bitget Wallet
 signing.
 
+For repeated swaps, select the bridge's developer mode and use the bounded swap
+session flow. It authorizes one chosen input token, cumulative amount cap, and
+duration of up to seven days for a specific router spender. The time window is
+enforced by the bridge and the amount cap is enforced by the ERC-20 allowance.
+ERC-20 allowances have no native expiry, so unused allowance remains until it
+is spent or revoked. Bitget Wallet still asks the user to sign every swap
+transaction.
+
 ## Network proxy
 
 The installer and bridge detect a configured Windows system HTTP proxy automatically and use it for WalletConnect's WebSocket relay. This keeps the MCP bridge aligned with the proxy used by the desktop wallet and browser.

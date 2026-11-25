@@ -39,12 +39,14 @@ confirmation, then call the wallet tool. Verify the receipt and resulting state.
 
 ### Developer mode
 
-Enable it when the user requests contract development or deployment. This mode
-supports:
+Enable it when the user requests contract development or deployment, or asks
+for repeated swaps under a bounded token-approval session. This mode supports:
 
 - arbitrary contract calls and native/ERC-20 transfers;
 - contract deployment transactions with creation bytecode and constructor data;
 - Morph fee-token fields (`feeTokenID`, `feeLimit`) when supported by the wallet;
+- a user-defined ERC-20 swap amount cap and off-chain time window for repeated
+  swaps through one bounded on-chain allowance;
 - local Hardhat compile/test and deployment through a configured secret provider.
 
 Developer mode does not mean asking the user to paste a private key or seed
@@ -196,14 +198,31 @@ credentials into chat or local skill files.
 
 Before the user signs, show the pair, amount, minimum received, slippage, market,
 transaction target, value, and expiry. The quote tool checks ERC-20 allowance
-and returns a one-use quote ID. If approval is needed, show token, exact amount,
-spender, network, and fees, then wait for clear user confirmation before calling
-`swap_approve`. After the approval receipt succeeds, request a fresh quote. Show
-the new quote details and wait for clear user confirmation before calling
-`swap_execute`. The bridge checks allowance again and the wallet prompts for
-each signature. Query the transaction receipt and resulting balances before
-reporting success. Never accept a private key in chat or retry an unknown
-submission.
+and returns a one-use quote ID. In lightweight mode, if approval is needed,
+show the token, exact amount, spender, network, and fees, then get clear user
+confirmation before calling `swap_approve`. After the approval receipt
+succeeds, request a fresh quote and get separate confirmation before
+`swap_execute`.
+
+In developer mode, the user may authorize one bounded swap session by choosing
+an ERC-20 input token, a maximum cumulative amount, and a duration of up to
+seven days. Show the token, amount cap, spender, network, duration, and the
+fact that ERC-20 allowance has no on-chain expiry. Get clear confirmation once
+before calling `swap_authorize_session`. After its approval receipt succeeds,
+call `swap_authorization_status` to activate and verify the session. During the
+active window, quotes and swaps for that input token and spender may proceed
+without asking again in chat for allowance or swap authorization, as long as
+the amount fits the remaining on-chain allowance. Bitget Wallet still presents
+each transaction for the user to sign. The bridge blocks session use after its
+expiry and enforces the ERC-20 allowance as the cumulative amount cap. Do not
+silently extend the time window, increase the amount cap, or use another token
+or spender. A bridge restart clears the off-chain session, while any unused
+on-chain allowance remains until spent or revoked. Tell the user when it has
+expired and offer to revoke the remaining allowance or set up a new session.
+
+For either mode, request a fresh quote after approval, verify transaction
+receipts and resulting balances, and never accept a private key in chat or retry
+an unknown submission.
 
 ## Read queries and Agent ID
 
