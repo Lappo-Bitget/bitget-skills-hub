@@ -218,7 +218,8 @@ expiry and enforces the ERC-20 allowance as the cumulative amount cap. Do not
 silently extend the time window, increase the amount cap, or use another token
 or spender. A bridge restart clears the off-chain session, while any unused
 on-chain allowance remains until spent or revoked. Tell the user when it has
-expired and offer to revoke the remaining allowance or set up a new session.
+expired and offer `swap_authorization_revoke` for the remaining allowance or
+set up a new session. Revocation also requires a Bitget Wallet signature.
 
 For either mode, request a fresh quote after approval, verify transaction
 receipts and resulting balances, and never accept a private key in chat or retry

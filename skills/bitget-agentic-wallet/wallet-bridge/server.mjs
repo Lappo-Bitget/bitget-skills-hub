@@ -380,6 +380,31 @@ server.registerTool('swap_authorization_status', {
   }));
 });
 
+server.registerTool('swap_authorization_revoke', {
+  title: 'Revoke bounded swap allowance',
+  description: 'Prepare a zero ERC-20 allowance for the spender in a bounded swap session. Show the current allowance and get clear user confirmation before calling. Bitget Wallet still asks the user to sign.',
+  inputSchema: { token: z.enum(['BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']) }
+}, async ({ token }) => {
+  const { p, address } = await connectedAccount();
+  const matching = [...swapAuthorizations.entries()].filter(([, grant]) =>
+    grant.address.toLowerCase() === address.toLowerCase() && grant.token === token
+  );
+  if (!matching.length) throw new Error('No bounded swap authorization is recorded for this token and wallet.');
+  const [key, grant] = matching.at(-1);
+  const allowance = await readTokenAllowance(p, grant.tokenAddress, address, grant.spender);
+  if (allowance === 0n) {
+    swapAuthorizations.delete(key);
+    return textResult(JSON.stringify({ revoked: true, status: 'already_zero', token, spender: grant.spender }));
+  }
+  const data = `0x095ea7b3${grant.spender.slice(2).toLowerCase().padStart(64, '0')}${'0'.repeat(64)}`;
+  const hash = await p.request({
+    method: 'eth_sendTransaction',
+    params: [{ from: address, to: grant.tokenAddress, data, value: '0x0' }]
+  });
+  swapAuthorizations.delete(key);
+  return textResult(JSON.stringify({ submitted: true, type: 'bounded_swap_authorization_revoke', token, spender: grant.spender, previousAllowance: allowance.toString(), hash }));
+});
+
 server.registerTool('swap_approve', {
   title: 'Request exact token approval for a swap',
   description: 'Prepare an exact ERC-20 allowance for a previously displayed Bitget Wallet quote. Call only after showing token, exact amount, spender, Morph network, and fees and receiving the user’s clear confirmation. Bitget Wallet still asks the user to sign. A fresh quote is required after approval.',
