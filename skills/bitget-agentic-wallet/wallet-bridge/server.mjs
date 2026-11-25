@@ -421,6 +421,22 @@ server.registerTool('local_signer_status', {
       pendingSwap = { status: BigInt(receipt.status) === 1n ? 'confirmed' : 'failed', hash: swapHash, receipt };
     }
   }
+  let allowanceStatus = null;
+  if (localSignerState.policy.spender) {
+    const asset = MORPH_ASSETS[localSignerState.policy.tokenIn];
+    const allowanceRemainingRaw = await readProviderAllowance(
+      localSignerState.provider,
+      asset.contract,
+      localSignerState.signer.address,
+      localSignerState.policy.spender
+    );
+    allowanceStatus = {
+      token: localSignerState.policy.tokenIn,
+      spender: localSignerState.policy.spender,
+      initialCapRaw: localSignerState.policy.amountCapRaw,
+      allowanceRemainingRaw: allowanceRemainingRaw.toString()
+    };
+  }
   return textResult(JSON.stringify({
     status: localSignerState.expiresAt > Date.now() ? 'active' : 'expired',
     address: localSignerState.signer.address,
@@ -428,6 +444,7 @@ server.registerTool('local_signer_status', {
     pendingApproval,
     pendingRevoke,
     pendingSwap,
+    allowance: allowanceStatus,
     expiresAt: new Date(localSignerState.expiresAt).toISOString(),
     signingPath: 'local_automatic_signer'
   }));
@@ -611,10 +628,22 @@ server.registerTool('local_swap_quote', {
   const result = await getMorphSwapQuote({ tokenIn, tokenOut, amount, slippage, address: local.signer.address });
   if (local.policy.spender && local.policy.spender.toLowerCase() !== result.transaction.to.toLowerCase()) throw new Error('The quote router differs from the spender authorized for this session.');
   local.policy.spender ||= result.transaction.to;
+  const allowanceRemaining = await readProviderAllowance(local.provider, asset.contract, local.signer.address, result.transaction.to);
   const quoteId = randomUUID();
   const expiresAt = Math.min(Date.now() + 300000, local.expiresAt);
   pendingSwapQuotes.set(quoteId, { ...result, address: local.signer.address, expiresAt, signingPath: 'local_automatic_signer' });
-  return textResult(JSON.stringify({ ...result, quoteId, expiresAt: new Date(expiresAt).toISOString(), signingPath: 'local_automatic_signer', automationPolicy: local.policy }));
+  return textResult(JSON.stringify({
+    ...result,
+    quoteId,
+    expiresAt: new Date(expiresAt).toISOString(),
+    signingPath: 'local_automatic_signer',
+    automationPolicy: local.policy,
+    allowanceBudget: {
+      initialCapRaw: local.policy.amountCapRaw,
+      allowanceRemainingRaw: allowanceRemaining.toString(),
+      firstApprovalRequired: !local.policy.approvalInitialized
+    }
+  }));
 });
 
 server.registerTool('local_swap_execute', {
@@ -683,7 +712,8 @@ server.registerTool('local_swap_execute', {
   const receipt = await waitForMorphReceipt(local.provider, transaction.hash);
   if (receipt.status !== '0x1') throw new Error(`Automatic signer swap failed. Inspect ${transaction.hash} before retrying.`);
   delete local.policy.pendingSwapHash;
-  return textResult(JSON.stringify({ submitted: true, confirmed: true, signingPath: 'local_automatic_signer', network: 'Morph Mainnet', chainId: 2818, wallet: local.signer.address, tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amount: quote.amount, estimatedOutput: quote.estimatedOutput, minimumOutput: quote.minimumOutput, approvalHash, hash: transaction.hash, receipt }));
+  const allowanceRemaining = await readProviderAllowance(local.provider, asset.contract, local.signer.address, quote.transaction.to);
+  return textResult(JSON.stringify({ submitted: true, confirmed: true, signingPath: 'local_automatic_signer', network: 'Morph Mainnet', chainId: 2818, wallet: local.signer.address, tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amount: quote.amount, estimatedOutput: quote.estimatedOutput, minimumOutput: quote.minimumOutput, allowanceBudget: { initialCapRaw: local.policy.amountCapRaw, allowanceRemainingRaw: allowanceRemaining.toString() }, approvalHash, hash: transaction.hash, receipt }));
 }));
 
 server.registerTool('swap_authorize_session', {

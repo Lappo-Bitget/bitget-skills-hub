@@ -50,9 +50,13 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
   the key in process memory, applies the selected pair, cumulative cap,
   per-trade cap, slippage, router, fee, and expiry policy, and signs the first
   approval plus later swaps locally. The local signer address is distinct from
-  the connected Bitget Wallet address. Call `local_signer_status` for pending
-  transaction resolution and `local_allowance_revoke` to remove the on-chain
-  allowance. Never accept this key in chat or terminal input.
+  the connected Bitget Wallet address. Its first approval sets the selected
+  cumulative cap once. Each successful swap consumes the ERC-20 allowance, and
+  the quote, execution result, and `local_signer_status` report the remaining
+  on-chain allowance. When it reaches zero, stop and require a newly configured
+  and confirmed allowance. Never silently reset or enlarge it. Use
+  `local_allowance_revoke` to remove any remainder. Never accept this key in
+  chat or terminal input.
 - **Swaps and quotes:** use a Morph-supported DEX or aggregator only after checking
   live availability, route, slippage, minimum received, and fee. A quote is not an
   order. Support market swaps and limit/trigger orders only when an available Morph
@@ -130,4 +134,8 @@ conversation-level authorization prompt until the cap or time window is
 exhausted. Bitget Wallet still asks the user to sign each transaction on this
 path. Local automatic sessions require a fresh quote for each user-requested
 swap, consume the quote before broadcast attempts, verify receipts through
-`local_signer_status`, and never retry an unknown submission.
+`local_signer_status`, and never retry an unknown submission. The first
+automatic approval is exactly the selected cumulative input cap. Each swap
+spends from that on-chain allowance. Display its remaining raw amount and refuse
+execution when it cannot cover the requested input. Never create a replacement
+allowance silently when it reaches zero.

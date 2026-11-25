@@ -240,9 +240,10 @@ wallet, so advise a dedicated wallet with only the funds needed for the policy.
 4. Call `local_signer_status` after the user says setup is complete. Report the
    independent address and active policy. Do not make a trade until the user
    issues a concrete swap request.
-5. For each requested trade, call `local_swap_quote` and show the quote and
-   policy headroom. On the first execution, also show the router, cumulative
-   allowance, fee cap, expiry, and quote, then call `local_swap_execute` with
+5. For each requested trade, call `local_swap_quote` and show the quote,
+   policy headroom, and remaining allowance. On the first execution, also show
+   the router, cumulative allowance, fee cap, expiry, and quote, then call
+   `local_swap_execute` with
    `我确认授权已展示的本地兑换策略、路由器额度授权和本次兑换。` as the
    `authorization` value only after the user clearly confirms those details.
    This first acknowledgement authorizes the bounded local policy. Later
