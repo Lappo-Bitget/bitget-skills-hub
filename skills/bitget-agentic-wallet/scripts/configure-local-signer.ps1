@@ -5,6 +5,23 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+
+function Write-BitgetLine {
+  param(
+    [string]$Message,
+    [ConsoleColor]$Color = [ConsoleColor]::Blue
+  )
+
+  Write-Host $Message -ForegroundColor $Color
+}
+
+Write-Host ''
+Write-Host '  BITGET WALLET' -ForegroundColor White -BackgroundColor Blue
+Write-BitgetLine '  本地自动签名钱包配置' -Color Cyan
+Write-Host ''
+Write-BitgetLine '  [1/2] 正在连接本机配置会话...' -Color Blue
+Write-BitgetLine "        地址: $SetupUrl" -Color DarkGray
 
 function ConvertTo-PlainText {
   param([Security.SecureString]$SecureValue)
@@ -34,7 +51,15 @@ try {
   }
 
   $submitUri = [Uri]::new($rootUri, $actionMatch.Groups['action'].Value)
-  $secureKey = Read-Host '请输入专用自动交易钱包私钥（不会显示）' -AsSecureString
+  Write-BitgetLine '  [2/2] 请输入专用自动交易钱包私钥' -Color Blue
+  Write-BitgetLine '        输入内容不会显示，也不会写入文件或发送到远程服务。' -Color DarkGray
+  $previousColor = $Host.UI.RawUI.ForegroundColor
+  try {
+    $Host.UI.RawUI.ForegroundColor = [ConsoleColor]::Blue
+    $secureKey = Read-Host -Prompt '        私钥' -AsSecureString
+  } finally {
+    $Host.UI.RawUI.ForegroundColor = $previousColor
+  }
   $privateKey = $null
   $body = $null
   try {
@@ -48,7 +73,8 @@ try {
     if ($result.StatusCode -lt 200 -or $result.StatusCode -ge 300) {
       throw "本地配置提交失败，HTTP 状态码 $($result.StatusCode)。"
     }
-    Write-Output '本地自动签名钱包已配置。私钥只在本机进程内存中处理。'
+    Write-BitgetLine '  ✓ 本地自动签名钱包已配置。' -Color Green
+    Write-BitgetLine '    私钥只在本机进程内存中处理。' -Color DarkGray
   } finally {
     $privateKey = $null
     $body = $null
