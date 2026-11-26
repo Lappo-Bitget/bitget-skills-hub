@@ -187,14 +187,14 @@ $footer.HorizontalAlignment = 'Right'
 [Windows.Controls.Grid]::SetRow($footer, 2)
 $root.Children.Add($footer) | Out-Null
 
-$delete = New-Object Windows.Controls.Button
-$delete.Content = '删除本地配置'
-$delete.Padding = '16,10'
-$delete.Margin = '0,0,12,0'
-$delete.Background = [Windows.Media.BrushConverter]::new().ConvertFromString($surface)
-$delete.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($muted)
-$delete.BorderBrush = [Windows.Media.BrushConverter]::new().ConvertFromString('#355157')
-$footer.Children.Add($delete) | Out-Null
+$deleteButton = New-Object Windows.Controls.Button
+$deleteButton.Content = '删除本地配置'
+$deleteButton.Padding = '16,10'
+$deleteButton.Margin = '0,0,12,0'
+$deleteButton.Background = [Windows.Media.BrushConverter]::new().ConvertFromString($surface)
+$deleteButton.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($muted)
+$deleteButton.BorderBrush = [Windows.Media.BrushConverter]::new().ConvertFromString('#355157')
+$footer.Children.Add($deleteButton) | Out-Null
 
 $save = New-Object Windows.Controls.Button
 $save.Content = '加密保存钱包'
@@ -220,7 +220,7 @@ $save.Add_Click({
   }
 })
 
-$delete.Add_Click({
+$deleteButton.Add_Click({
   try {
     if (Test-Path -LiteralPath $configPath) { Remove-Item -LiteralPath $configPath -Force }
     $status.Text = '本地钱包配置已删除。'
