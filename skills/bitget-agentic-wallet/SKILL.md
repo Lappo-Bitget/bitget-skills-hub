@@ -231,6 +231,10 @@ wallet, so advise a dedicated wallet with only the funds needed for the policy.
    directly in that page. Never copy the key, inspect it, or send it through
    chat, shell arguments, or another website. If the Codex browser cannot open
    the URL, show the loopback URL so the user can open it locally themselves.
+   On Windows, the user may instead run
+   `scripts/configure-local-signer.ps1 -SetupUrl <loopback-url>` in a local
+   PowerShell window. The script reads the key with `Read-Host -AsSecureString`,
+   posts only to the loopback setup session, and never writes the key to disk.
 3. After the user says setup is complete, call `local_signer_status` and report
    the independent address. Wallet setup does not set a swap policy, authorize
    an allowance, or enable trading. Stop here when the user only wants wallet

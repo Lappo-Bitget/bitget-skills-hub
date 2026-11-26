@@ -285,8 +285,8 @@ server.registerTool('local_signer_setup', {
     }
     if (requestUrl.pathname === '/submit' && request.method === 'POST' && requestUrl.searchParams.get('token') === sessionToken) {
       if (localSignerSetup.expiresAt <= Date.now()) { response.writeHead(410); response.end('Setup window expired.'); return; }
-      const expectedOrigin = `http://${expectedHost}`;
-      if (request.headers.origin !== expectedOrigin) {
+      const origin = request.headers.origin;
+      if (origin && origin !== 'null' && origin !== `http://${expectedHost}`) {
         response.writeHead(403); response.end('Local origin check failed.'); return;
       }
       if (!String(request.headers['content-type'] || '').startsWith('application/x-www-form-urlencoded')) {

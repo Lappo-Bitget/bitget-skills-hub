@@ -87,6 +87,21 @@ no native expiry, so unused allowance remains until it is spent or explicitly
 revoked. See `skills/bitget-agentic-wallet/SKILL.md` for the local window,
 policy, status, and revoke workflow.
 
+### Configure the local signer from PowerShell
+
+After the MCP tool `local_signer_setup` returns its loopback URL, Windows users
+can enter the key in a local PowerShell prompt instead of the browser page:
+
+```powershell
+pwsh -NoProfile -File .\skills\bitget-agentic-wallet\scripts\configure-local-signer.ps1 `
+  -SetupUrl http://127.0.0.1:<port>/
+```
+
+The script fetches the one-time form token from that URL, reads the key with
+`Read-Host -AsSecureString`, and submits it only to the loopback bridge. It
+does not save, print, or send the key to a remote service. The MCP session
+must remain running until the submission completes.
+
 ## Network proxy
 
 The installer and bridge detect a configured Windows system HTTP proxy automatically and use it for WalletConnect's WebSocket relay. This keeps the MCP bridge aligned with the proxy used by the desktop wallet and browser.
