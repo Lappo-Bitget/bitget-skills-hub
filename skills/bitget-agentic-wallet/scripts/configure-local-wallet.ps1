@@ -6,6 +6,16 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Windows PowerShell 5.1 exposes ProtectedData through System.Security,
+# while PowerShell 7 may ship it as a dedicated assembly. Load whichever
+# assembly is available before resolving the type.
+try {
+  Add-Type -AssemblyName System.Security.Cryptography.ProtectedData -ErrorAction Stop
+} catch {
+  Add-Type -AssemblyName System.Security -ErrorAction Stop
+}
+
 $dataRoot = Join-Path $env:LOCALAPPDATA 'Bitget Wallet'
 $configPath = Join-Path $dataRoot 'developer-wallet.dpapi.json'
 
