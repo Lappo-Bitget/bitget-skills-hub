@@ -20,9 +20,7 @@ Write-Host '  BITGET WALLET' -ForegroundColor White -BackgroundColor Blue
 Write-BitgetLine '  本地自动签名钱包配置' -Color Cyan
 Write-Host ''
 if ([string]::IsNullOrWhiteSpace($SetupUrl)) {
-  Write-BitgetLine '  请先在 Codex 中调用 local_signer_setup 获取本机设置地址。' -Color DarkGray
-  Write-Host ''
-  $SetupUrl = Read-Host '  MCP 本机设置地址'
+  throw '没有收到 MCP 本机设置地址。请通过 Codex Bitget Wallet skill 启动配置流程，不要手动填写地址。'
 }
 
 Write-BitgetLine '  [1/2] 正在连接本机配置会话...' -Color Blue

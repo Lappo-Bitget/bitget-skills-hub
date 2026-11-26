@@ -225,18 +225,15 @@ wallet, so advise a dedicated wallet with only the funds needed for the policy.
 
 1. Enter developer mode using `wallet_set_mode` and the exact acknowledgement
    required by the tool.
-2. Call `local_signer_setup` with no swap parameters. Use
-   `mcp__codex_app__open_in_codex` with the returned loopback URL and target type
-   `browser` to open the injection page. The user enters and submits the key
-   directly in that page. Never copy the key, inspect it, or send it through
-   chat, shell arguments, or another website. If the Codex browser cannot open
-   the URL, show the loopback URL so the user can open it locally themselves.
-   On Windows, the user may instead double-click
-   `scripts/configure-local-signer.cmd`, or run
-   `scripts/configure-local-signer.ps1 -SetupUrl <loopback-url>` in a local
-   PowerShell window. The launcher bypasses the usual `.ps1` double-click
-   editor behavior. The script reads the key with `Read-Host -AsSecureString`,
-   posts only to the loopback setup session, and never writes the key to disk.
+2. Call `local_signer_setup` with no swap parameters and retain its returned
+   loopback URL. On Windows Codex, start the installed
+   `scripts/configure-local-signer.cmd` in a visible terminal and pass the URL
+   returned by the tool as its argument. Open that terminal in Codex for the
+   user. The script reads only the private key from the user with
+   `Read-Host -AsSecureString`. Do not ask the user to copy or type the MCP
+   URL. Never copy, inspect, or send the key through chat, command-line
+   arguments, or another website. If local terminal execution is unavailable,
+   open the returned loopback URL in the browser for local entry.
 3. After the user says setup is complete, call `local_signer_status` and report
    the independent address. Wallet setup does not set a swap policy, authorize
    an allowance, or enable trading. Stop here when the user only wants wallet

@@ -89,15 +89,16 @@ policy, status, and revoke workflow.
 
 ### Configure the local signer from PowerShell
 
-After the MCP tool `local_signer_setup` returns its loopback URL, Windows users
-can double-click `configure-local-signer.cmd`. The launcher asks for the MCP loopback URL,
-then opens a hidden PowerShell key prompt:
+After the MCP tool `local_signer_setup` returns its loopback URL, Codex passes
+that URL to `configure-local-signer.cmd` and opens the local PowerShell prompt.
+The user only enters the private key. The launcher does not ask the user to
+copy or type the MCP URL:
 
 ```text
-skills\bitget-agentic-wallet\scripts\configure-local-signer.cmd
+skills\bitget-agentic-wallet\scripts\configure-local-signer.cmd http://127.0.0.1:<port>/
 ```
 
-Users who already have the URL can also run the PowerShell script directly:
+The script can also be run directly by the skill with the returned URL:
 
 ```powershell
 pwsh -NoProfile -File .\skills\bitget-agentic-wallet\scripts\configure-local-signer.ps1 `
