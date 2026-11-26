@@ -81,11 +81,11 @@ function openLocalWalletConfigurator() {
     return { opened: false, reason: 'script_not_found', path: LOCAL_WALLET_CMD };
   }
 
-  const commandShell = process.env.ComSpec || 'cmd.exe';
-  const child = spawn(commandShell, ['/d', '/c', `start "" "${LOCAL_WALLET_CMD}"`], {
+  const child = spawn(LOCAL_WALLET_CMD, [], {
     detached: true,
     stdio: 'ignore',
-    windowsHide: false
+    windowsHide: false,
+    shell: true
   });
   child.once('error', () => {});
   child.unref();
