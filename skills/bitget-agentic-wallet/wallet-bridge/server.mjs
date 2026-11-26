@@ -127,9 +127,113 @@ async function readProviderAllowance(provider, tokenAddress, owner, spender) {
 
 function localSignerPage(token, policy) {
   const policyDetails = policy
-    ? `<div class="details"><strong>当前兑换策略</strong><br>${policy.tokenIn} → ${policy.tokenOut}<br>累计上限 ${policy.maxAmount} ${policy.tokenIn} · 单笔上限 ${policy.maxPerTrade} ${policy.tokenIn}<br>最大滑点 ${policy.maxSlippage}% · 有效期 ${policy.durationMinutes} 分钟</div>`
+    ? `<div class="details"><strong>当前兑换策略</strong><br><span class="details-pair">${policy.tokenIn} → ${policy.tokenOut}</span><br>累计上限 ${policy.maxAmount} ${policy.tokenIn} · 单笔上限 ${policy.maxPerTrade} ${policy.tokenIn}<br>最大滑点 ${policy.maxSlippage}% · 有效期 ${policy.durationMinutes} 分钟</div>`
     : '';
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"><title>Bitget Wallet 开发者模式</title><style>:root{color-scheme:dark;font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif;background:#070b16;color:#f5f7ff}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 80% -10%,#143d75 0,#0b1730 34%,#070b16 72%);padding:32px 18px}.shell{max-width:760px;margin:0 auto}.brand{display:flex;align-items:center;gap:12px;margin:0 0 42px}.brand-mark{width:42px;height:42px;display:grid;place-items:center;border-radius:14px;background:#1890ff;box-shadow:0 10px 28px #1688ff55}.brand-mark svg{width:29px;height:29px}.brand-name{font-size:18px;font-weight:700}.brand-name span{display:block;color:#7f8da8;font-size:11px;font-weight:500;letter-spacing:1.5px;margin-top:3px}.hero h1{font-size:42px;line-height:1.1;letter-spacing:-1px;margin:0 0 12px}.hero h1 em{font-style:normal;color:#3aa7ff}.hero p{color:#aebbd2;line-height:1.7;margin:0 0 28px}.card{background:#101a2cdd;border:1px solid #2a3c5b;border-radius:22px;padding:26px;box-shadow:0 24px 60px #0008}.notice{display:flex;gap:12px;background:#132b4b;border:1px solid #1e79c7;border-radius:14px;padding:15px 16px;color:#c8e8ff;line-height:1.65;margin-bottom:20px}.notice strong{color:#fff}.notice-icon{color:#4db1ff;font-size:20px;line-height:1}.details{color:#aebbd2;font-size:14px;line-height:1.7;margin:0 0 20px}.details strong{color:#eef5ff}.field-label{display:block;color:#eaf2ff;font-size:14px;font-weight:600;margin-bottom:8px}.field-hint{color:#8190aa;font-size:12px;margin:0 0 10px}input,button{font:inherit;width:100%;border-radius:12px;padding:13px 14px}input{color:#f5f7ff;background:#0a1120;border:1px solid #3a4d6b;outline:none}input:focus{border-color:#2fa6ff;box-shadow:0 0 0 3px #2fa6ff2e}button{margin-top:14px;border:0;color:#fff;background:linear-gradient(135deg,#168fff,#2563eb);font-weight:700;cursor:pointer;box-shadow:0 12px 24px #168fff33}.footer{color:#667694;font-size:12px;text-align:center;margin-top:18px}@media(max-width:560px){.hero h1{font-size:34px}.card{padding:20px}}</style></head><body><main class="shell"><header class="brand"><div class="brand-mark" aria-label="Bitget Wallet logo"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M16 3.5c7.3 0 12.5 4.2 12.5 10.2 0 5.4-4.3 9.4-10 9.4-4.8 0-8.3-2.8-8.3-6.5 0-3.2 2.6-5.6 6.1-5.6 2.7 0 4.7 1.6 4.7 3.8 0 1.9-1.5 3.2-3.4 3.2-1.6 0-2.7-.9-2.7-2.2" stroke="white" stroke-width="2.6" stroke-linecap="round"/><path d="M16 28.5C8.7 28.5 3.5 24.3 3.5 18.3c0-5.4 4.3-9.4 10-9.4" stroke="white" stroke-width="2.6" stroke-linecap="round"/></svg></div><div class="brand-name">Bitget Wallet™<span>SECURE ON-DEVICE SIGNING</span></div></header><section class="hero"><h1>Bitget Wallet <em>开发者模式</em></h1><p>配置一个独立的本地自动签名钱包，用于执行你明确授权范围内的操作。</p></section><section class="card"><div class="notice"><div class="notice-icon">●</div><div><strong>私钥仅提交到本机</strong><br>私钥只发送到 127.0.0.1，成功后仅保存在当前 MCP 进程内存，不会写入文件或发送到远程服务。请使用独立自动交易钱包私钥，不要使用 Bitget Wallet 主钱包私钥。</div></div>${policyDetails}<p class="details">此步骤只配置本地签名器，不会授权额度，也不会执行兑换。后续策略需要单独设置。</p><form method="post" action="/submit?token=${encodeURIComponent(token)}"><label class="field-label" for="privateKey">专用自动交易钱包私钥</label><p class="field-hint">输入内容不会显示，仅在本机内存中处理</p><input id="privateKey" name="privateKey" type="password" autocomplete="off" required pattern="0x[0-9a-fA-F]{64}" placeholder="0x + 64 位十六进制字符"><button type="submit">在本机内存中启用</button></form></section><div class="footer">Morph Mainnet · Bitget Wallet Developer Mode</div></main></body></html>`;
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'">
+  <title>Bitget Wallet开发者模式</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bgw-navy: #001F29;
+      --bgw-bg: #00080A;
+      --bgw-surface: #121717;
+      --bgw-surface-raised: #1B2122;
+      --bgw-cyan: #00F0FF;
+      --bgw-cta: #00E6F5;
+      --bgw-text: #FFFFFF;
+      --bgw-muted: #91A0A1;
+      --bgw-line: rgba(0, 240, 255, .18);
+      --bgw-radius-card: 20px;
+      --bgw-radius-control: 12px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--bgw-text);
+      font-family: "Causten Round", Inter, "AlibabaPuHuiTi", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      background:
+        radial-gradient(circle at 80% -16%, rgba(0, 240, 255, .12), transparent 34%),
+        radial-gradient(circle at 8% 82%, rgba(0, 31, 41, .74), transparent 42%),
+        var(--bgw-bg);
+      padding: 32px 18px 28px;
+    }
+    .shell { width: min(100%, 760px); margin: 0 auto; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 72px; }
+    .brand { display: inline-flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; }
+    .brand-mark { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 13px; overflow: hidden; background: #fff; box-shadow: 0 10px 30px rgba(0, 240, 255, .12); }
+    .brand-mark svg { display: block; width: 100%; height: 100%; }
+    .brand-name { font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
+    .brand-name .tm { color: var(--bgw-cyan); font-size: 11px; vertical-align: top; margin-left: 2px; }
+    .brand-name small { display: block; margin-top: 4px; color: var(--bgw-muted); font-size: 10px; font-weight: 600; letter-spacing: .14em; }
+    .network-pill, .local-pill { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--bgw-line); border-radius: 999px; padding: 7px 11px; color: #B9F9FF; font-size: 11px; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
+    .network-pill::before { width: 6px; height: 6px; border-radius: 50%; background: var(--bgw-cyan); box-shadow: 0 0 12px var(--bgw-cyan); content: ''; }
+    .hero { margin-bottom: 28px; }
+    .eyebrow { margin: 0 0 14px; color: var(--bgw-cyan); font-size: 11px; font-weight: 700; letter-spacing: .16em; }
+    .hero h1 { margin: 0 0 14px; font-size: clamp(36px, 7vw, 58px); line-height: 1.04; letter-spacing: -.055em; }
+    .hero h1 span { color: var(--bgw-cyan); }
+    .hero p { max-width: 610px; margin: 0; color: var(--bgw-muted); font-size: 16px; line-height: 1.7; }
+    .card { padding: 24px; border: 1px solid rgba(255,255,255,.09); border-radius: var(--bgw-radius-card); background: linear-gradient(145deg, rgba(27,33,34,.96), rgba(18,23,23,.94)); box-shadow: 0 24px 70px rgba(0,0,0,.35); }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+    .card-head .eyebrow { margin: 0; }
+    .local-pill { color: var(--bgw-muted); border-color: rgba(145,160,161,.25); }
+    .notice { display: flex; gap: 12px; margin-bottom: 20px; padding: 15px 16px; border: 1px solid rgba(0, 240, 255, .24); border-radius: 14px; background: rgba(0, 31, 41, .72); color: #C2E8EA; line-height: 1.65; }
+    .notice strong { color: var(--bgw-text); }
+    .notice-icon { color: var(--bgw-cyan); font-size: 15px; line-height: 1.45; }
+    .details { margin: 0 0 20px; color: var(--bgw-muted); font-size: 13px; line-height: 1.75; }
+    .details strong { color: var(--bgw-text); }
+    .details-pair { display: inline-block; margin: 4px 0; color: var(--bgw-cyan); font-size: 18px; font-weight: 700; }
+    .intro { margin: 0 0 22px; color: var(--bgw-muted); font-size: 13px; line-height: 1.7; }
+    .field-label { display: block; margin-bottom: 8px; color: var(--bgw-text); font-size: 14px; font-weight: 700; }
+    .field-hint { margin: 0 0 10px; color: #718384; font-size: 12px; }
+    input, button { width: 100%; border-radius: var(--bgw-radius-control); font: inherit; }
+    input { padding: 14px; color: var(--bgw-text); background: #0B1112; border: 1px solid rgba(145,160,161,.34); outline: none; }
+    input::placeholder { color: #718384; }
+    input:focus { border-color: var(--bgw-cyan); box-shadow: 0 0 0 3px rgba(0,240,255,.14); }
+    button { margin-top: 14px; padding: 14px; color: #03313A; background: var(--bgw-cta); border: 0; font-weight: 800; cursor: pointer; box-shadow: 0 12px 26px rgba(0,240,255,.14); transition: transform .16s ease, background .16s ease; }
+    button:hover { background: #62EEF8; transform: translateY(-1px); }
+    button:focus-visible { outline: 3px solid rgba(0,240,255,.38); outline-offset: 2px; }
+    .footer { margin-top: 18px; color: #718384; font-size: 12px; text-align: center; }
+    @media (max-width: 560px) { body { padding-top: 22px; } .topbar { align-items: flex-start; margin-bottom: 54px; } .network-pill { display: none; } .card { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand" aria-label="Bitget Wallet logo">
+        <span class="brand-mark">
+          <svg viewBox="0 0 256 256" fill="none" aria-hidden="true"><rect width="256" height="256" rx="60" fill="white"/><path d="M106.519 37.6134C96.1838 37.6081 85.8668 37.6029 75.4959 37.6187C69.2249 37.6187 66.8728 45.4915 71.5367 50.1548L142.135 120.753C144.338 122.768 145.712 124.958 145.762 127.846C145.712 130.733 144.338 132.923 142.135 134.938L71.5367 205.536C66.8728 210.2 69.2249 218.072 75.4959 218.072C85.8668 218.088 96.1838 218.083 106.519 218.078C111.693 218.075 116.872 218.072 122.064 218.072C128.857 218.072 132.897 214.444 136.526 210.815L200.196 147.145C205.278 142.063 209.824 135.316 209.763 127.846C209.824 120.375 205.278 113.628 200.196 108.547L136.526 44.8765C132.897 41.2477 128.857 37.6187 122.064 37.6187C116.872 37.6187 111.693 37.6161 106.519 37.6134Z" fill="#001F29"/></svg>
+        </span>
+        <span class="brand-name">Bitget Wallet<span class="tm">™</span><small>SECURE ON-DEVICE SIGNING</small></span>
+      </div>
+      <span class="network-pill">Morph Mainnet</span>
+    </header>
+    <section class="hero">
+      <p class="eyebrow">LOCAL SIGNER · DEVELOPER MODE</p>
+      <h1>Bitget Wallet<br><span>开发者模式</span></h1>
+      <p>配置一个独立的本地自动签名钱包，用于执行你明确授权范围内的操作。</p>
+    </section>
+    <section class="card">
+      <div class="card-head"><p class="eyebrow">ONE-TIME SETUP</p><span class="local-pill">127.0.0.1 · LOCAL ONLY</span></div>
+      <div class="notice"><div class="notice-icon">●</div><div><strong>私钥仅提交到本机</strong><br>私钥只发送到 127.0.0.1，成功后仅保存在当前 MCP 进程内存，不会写入文件或发送到远程服务。请使用独立自动交易钱包私钥，不要使用 Bitget Wallet 主钱包私钥。</div></div>
+      ${policyDetails}
+      <p class="intro">此步骤只配置本地签名器，不会授权额度，也不会执行兑换。后续策略需要单独设置。</p>
+      <form method="post" action="/submit?token=${encodeURIComponent(token)}">
+        <label class="field-label" for="privateKey">专用自动交易钱包私钥</label>
+        <p class="field-hint">输入内容不会显示，仅在本机内存中处理</p>
+        <input id="privateKey" name="privateKey" type="password" autocomplete="off" required pattern="0x[0-9a-fA-F]{64}" placeholder="0x + 64 位十六进制字符">
+        <button type="submit">在本机内存中启用</button>
+      </form>
+    </section>
+    <div class="footer">Morph Mainnet · Bitget Wallet Developer Mode</div>
+  </main>
+</body>
+</html>`;
 }
 async function connectedAccount() {
   const p = requireProvider();
