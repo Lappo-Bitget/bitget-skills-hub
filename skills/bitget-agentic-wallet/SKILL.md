@@ -47,19 +47,24 @@ for repeated swaps under a bounded token-approval session. This mode supports:
   swaps through one bounded on-chain allowance;
 - local Hardhat compile/test and deployment through a configured secret provider.
 
-When developer mode is enabled on Windows, the bridge automatically opens
-`scripts/configure-local-wallet.cmd` in a separate console window. The window
-uses the Bitget Wallet visual style and accepts the private key only locally.
-The script stores the key with Windows DPAPI CurrentUser encryption at
-`%LOCALAPPDATA%\Bitget Wallet\developer-wallet.dpapi.json`. Wait for the
-local configuration window to report success before continuing with any local
-signing workflow. The private key must never be entered in chat, passed as a
-command-line argument, or placed in a plaintext environment variable.
+After developer mode is acknowledged, select a signing path explicitly.
+For the local automatic signer, call `local_signer_status`. If it reports
+`not_configured`, call `local_signer_setup` immediately. That MCP tool opens
+the loopback-only Bitget Wallet-styled setup window and accepts the private key
+only on the local machine. After the user finishes, call
+`local_signer_status` again and verify that an address is returned before any
+local signing operation. A DPAPI record created by the standalone
+`scripts/configure-local-wallet.cmd` is not, by itself, proof that the MCP
+local signer is configured. The private key must never be entered in chat,
+passed as a command-line argument, or placed in a plaintext environment
+variable.
 
-Developer mode keeps connected-wallet transaction signing in Bitget Wallet.
-Each connected-wallet transaction remains visible for review and approval in
-the wallet. The local DPAPI wallet is an independent developer wallet used only
-by explicitly selected local signing workflows. For Hardhat signing, use
+Connected-wallet signing remains in Bitget Wallet, and each transaction is
+visible for review and approval there. The local automatic signer is an
+independent wallet. Before its first swap, call `local_signer_policy_set` with
+the user-selected token pair, cumulative amount cap, per-trade cap, slippage,
+duration, and fee limit. Use `local_swap_quote` and
+`local_swap_execute` only while that policy is active. For Hardhat signing, use
 only the host's configured secret provider to inject
 `MORPH_DEPLOYER_PRIVATE_KEY` into a short-lived deployment process; never
 display, persist, log, or commit it. Never batch opaque transactions or silently
@@ -86,8 +91,10 @@ directly only when a blank project needs setup before contract source is ready.
 The optional `--plan` is read-only. Initialization is idempotent, does not
 overwrite files, blocks version conflicts, and uses `npm --ignore-scripts`.
 
-State that Bitget Wallet is the signing device for wallet transactions. It must
-show each transaction for approval inside the wallet app.
+For the connected-wallet path, state that Bitget Wallet is the signing device
+and that each transaction is shown for approval inside the wallet app. For the
+local automatic path, state that the independent local signer broadcasts
+within the active policy and does not open a Bitget Wallet approval popup.
 
 ## Interface design baseline
 
@@ -99,6 +106,13 @@ modular cards, generous spacing, and rounded controls. Keep one clear primary
 action per view and verify desktop and narrow-screen layouts before delivery.
 
 ## Actual workflows
+
+- **Developer-mode signer setup.** Call `wallet_set_mode` with the exact user
+  acknowledgement. Do not treat that response as local signer setup. When the
+  user chooses local automatic signing, call `local_signer_status`, launch
+  `local_signer_setup` when needed, and check status again after the local
+  window reports completion. Do not call local swap tools while the status is
+  `not_configured` or while a policy is absent or expired.
 
 - **Bitget Wallet deployment gate.** When a user asks to deploy a contract and
   the Bitget Wallet signing path is selected, call
@@ -216,12 +230,16 @@ confirmation before calling `swap_approve`. After the approval receipt
 succeeds, request a fresh quote and get separate confirmation before
 `swap_execute`.
 
-For developer-mode swaps, use `swap_authorize_session` to set a bounded token
-allowance and off-chain duration on the connected Bitget Wallet. Show the
-network, pair, amount cap, duration, spender, and expected fees before the
-wallet approval. Every swap transaction remains visible for review and signing
-in Bitget Wallet. Request a fresh quote after approval, verify transaction
-receipts and resulting balances, and never retry an unknown submission.
+For developer-mode swaps, choose the signer before quoting. For the connected
+Bitget Wallet path, use `swap_authorize_session`, show the network, pair,
+amount cap, duration, spender, and expected fees, then obtain the wallet
+approval. Every connected-wallet transaction remains visible for review and
+signing in Bitget Wallet. For the local automatic signer path, use
+`local_swap_quote` and `local_swap_execute`. The first execution requires an
+explicit acknowledgement after showing the active policy, router, allowance,
+fees, and quote. Later swaps are allowed only when the active policy still
+covers the pair, amount, slippage, and expiry. Verify receipts and resulting
+balances, and never retry an unknown submission.
 
 ## Read queries and Agent ID
 
