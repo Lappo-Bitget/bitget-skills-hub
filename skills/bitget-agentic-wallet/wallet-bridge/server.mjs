@@ -1,7 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { existsSync } from 'node:fs';
 import { unlink, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import Ws from 'ws';
@@ -34,12 +37,15 @@ const RPC = 'https://rpc-bgw.morph.network';
 const PROJECT_ID = process.env.WALLETCONNECT_PROJECT_ID || '8c4660c0aeaeebdec859180fb6679463';
 const DAPP_URL = 'https://morph-agent-id.pages.dev/';
 const QR_FILE = fileURLToPath(new URL('./walletconnect-qr.png', import.meta.url));
+const BRIDGE_DIR = dirname(fileURLToPath(import.meta.url));
+const LOCAL_WALLET_CMD = resolve(BRIDGE_DIR, '..', 'scripts', 'configure-local-wallet.cmd');
 let provider = null;
 let pairingPromise = null;
 let pairingQr = null;
 let pairingUri = null;
 let pairingQrPath = null;
 let walletMode = 'light';
+let localWalletConfiguratorStarted = false;
 const pendingSwapQuotes = new Map();
 const swapAuthorizations = new Map();
 try { await unlink(QR_FILE); } catch { /* remove a stale QR from a previous bridge process */ }
@@ -65,6 +71,25 @@ function pairingText(text) {
 function requireProvider() {
   if (!provider) throw new Error('No WalletConnect session. Call connect_wallet first and scan its QR in Bitget Wallet.');
   return provider;
+}
+
+function openLocalWalletConfigurator() {
+  if (process.platform !== 'win32') {
+    return { opened: false, reason: 'windows_only' };
+  }
+  if (!existsSync(LOCAL_WALLET_CMD)) {
+    return { opened: false, reason: 'script_not_found', path: LOCAL_WALLET_CMD };
+  }
+
+  const commandShell = process.env.ComSpec || 'cmd.exe';
+  const child = spawn(commandShell, ['/d', '/c', `start "" "${LOCAL_WALLET_CMD}"`], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false
+  });
+  child.once('error', () => {});
+  child.unref();
+  return { opened: true, path: LOCAL_WALLET_CMD };
 }
 
 async function connectedAccount() {
@@ -181,7 +206,16 @@ server.registerTool('wallet_set_mode', {
   }
   walletMode = mode;
   if (mode === 'light') swapAuthorizations.clear();
-  return textResult(JSON.stringify({ mode: walletMode, signing: mode === 'developer' ? 'Bitget Wallet approval required for writes' : 'Bitget Wallet approval required for writes' }));
+  const localWallet = mode === 'developer' && !localWalletConfiguratorStarted
+    ? openLocalWalletConfigurator()
+    : { opened: false, reason: mode === 'developer' ? 'already_opened' : 'light_mode' };
+  if (mode === 'developer' && localWallet.opened) localWalletConfiguratorStarted = true;
+  if (mode === 'light') localWalletConfiguratorStarted = false;
+  return textResult(JSON.stringify({
+    mode: walletMode,
+    signing: 'Bitget Wallet approval required for writes',
+    localWalletConfigurator: localWallet
+  }));
 });
 
 server.registerTool('wallet_disconnect', {

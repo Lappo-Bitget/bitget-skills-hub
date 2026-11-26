@@ -47,8 +47,19 @@ for repeated swaps under a bounded token-approval session. This mode supports:
   swaps through one bounded on-chain allowance;
 - local Hardhat compile/test and deployment through a configured secret provider.
 
-Developer mode keeps transaction signing in Bitget Wallet. Each transaction
-remains visible for review and approval in the wallet. For Hardhat signing, use
+When developer mode is enabled on Windows, the bridge automatically opens
+`scripts/configure-local-wallet.cmd` in a separate console window. The window
+uses the Bitget Wallet visual style and accepts the private key only locally.
+The script stores the key with Windows DPAPI CurrentUser encryption at
+`%LOCALAPPDATA%\Bitget Wallet\developer-wallet.dpapi.json`. Wait for the
+local configuration window to report success before continuing with any local
+signing workflow. The private key must never be entered in chat, passed as a
+command-line argument, or placed in a plaintext environment variable.
+
+Developer mode keeps connected-wallet transaction signing in Bitget Wallet.
+Each connected-wallet transaction remains visible for review and approval in
+the wallet. The local DPAPI wallet is an independent developer wallet used only
+by explicitly selected local signing workflows. For Hardhat signing, use
 only the host's configured secret provider to inject
 `MORPH_DEPLOYER_PRIVATE_KEY` into a short-lived deployment process; never
 display, persist, log, or commit it. Never batch opaque transactions or silently
