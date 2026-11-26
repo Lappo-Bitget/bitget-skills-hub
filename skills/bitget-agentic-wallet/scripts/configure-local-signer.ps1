@@ -1,6 +1,5 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
-  [Parameter(Mandatory = $true)]
   [string]$SetupUrl
 )
 
@@ -20,6 +19,12 @@ Write-Host ''
 Write-Host '  BITGET WALLET' -ForegroundColor White -BackgroundColor Blue
 Write-BitgetLine '  本地自动签名钱包配置' -Color Cyan
 Write-Host ''
+if ([string]::IsNullOrWhiteSpace($SetupUrl)) {
+  Write-BitgetLine '  请先在 Codex 中调用 local_signer_setup 获取本机设置地址。' -Color DarkGray
+  Write-Host ''
+  $SetupUrl = Read-Host '  MCP 本机设置地址'
+}
+
 Write-BitgetLine '  [1/2] 正在连接本机配置会话...' -Color Blue
 Write-BitgetLine "        地址: $SetupUrl" -Color DarkGray
 
@@ -81,6 +86,6 @@ try {
     $secureKey = $null
   }
 } catch {
-  Write-Error $_.Exception.Message
+  Write-BitgetLine "  ✗ $($_.Exception.Message)" -Color Red
   exit 1
 }

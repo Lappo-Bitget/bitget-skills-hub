@@ -90,7 +90,14 @@ policy, status, and revoke workflow.
 ### Configure the local signer from PowerShell
 
 After the MCP tool `local_signer_setup` returns its loopback URL, Windows users
-can enter the key in a local PowerShell prompt instead of the browser page:
+can double-click `configure-local-signer.cmd`. The launcher asks for the MCP loopback URL,
+then opens a hidden PowerShell key prompt:
+
+```text
+skills\bitget-agentic-wallet\scripts\configure-local-signer.cmd
+```
+
+Users who already have the URL can also run the PowerShell script directly:
 
 ```powershell
 pwsh -NoProfile -File .\skills\bitget-agentic-wallet\scripts\configure-local-signer.ps1 `
