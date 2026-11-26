@@ -19,8 +19,27 @@ Write-Host ''
 Write-Host '  BITGET WALLET' -ForegroundColor White -BackgroundColor Blue
 Write-BitgetLine '  本地自动签名钱包配置' -Color Cyan
 Write-Host ''
+
+function Find-LocalSignerSetupUrl {
+  $ports = @(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty LocalPort -Unique)
+  foreach ($port in $ports) {
+    try {
+      $candidate = "http://127.0.0.1:$port/"
+      $page = Invoke-WebRequest -Uri $candidate -UseBasicParsing -TimeoutSec 1
+      if ($page.Content -match 'Morph 自动交易钱包' -and $page.Content -match 'action="/submit\?token=[^"]+"') {
+        return $candidate
+      }
+    } catch {
+      continue
+    }
+  }
+  throw '未找到活动的本地配置会话。请先让 Bitget Wallet skill 调用 local_signer_setup。'
+}
+
 if ([string]::IsNullOrWhiteSpace($SetupUrl)) {
-  throw '没有收到 MCP 本机设置地址。请通过 Codex Bitget Wallet skill 启动配置流程，不要手动填写地址。'
+  Write-BitgetLine '  正在自动查找 Bitget Wallet 本机配置会话...' -Color DarkGray
+  $SetupUrl = Find-LocalSignerSetupUrl
 }
 
 Write-BitgetLine '  [1/2] 正在连接本机配置会话...' -Color Blue

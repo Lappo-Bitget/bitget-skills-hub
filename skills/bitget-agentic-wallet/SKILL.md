@@ -225,15 +225,14 @@ wallet, so advise a dedicated wallet with only the funds needed for the policy.
 
 1. Enter developer mode using `wallet_set_mode` and the exact acknowledgement
    required by the tool.
-2. Call `local_signer_setup` with no swap parameters and retain its returned
-   loopback URL. On Windows Codex, start the installed
-   `scripts/configure-local-signer.cmd` in a visible terminal and pass the URL
-   returned by the tool as its argument. Open that terminal in Codex for the
-   user. The script reads only the private key from the user with
-   `Read-Host -AsSecureString`. Do not ask the user to copy or type the MCP
-   URL. Never copy, inspect, or send the key through chat, command-line
-   arguments, or another website. If local terminal execution is unavailable,
-   open the returned loopback URL in the browser for local entry.
+2. Call `local_signer_setup` with no swap parameters. On Windows, the bridge
+   may open a visible PowerShell window automatically. The user may also
+   double-click `scripts/configure-local-signer.cmd`, which discovers the
+   active Bitget Wallet loopback session automatically. The user only enters
+   the private key with `Read-Host -AsSecureString`. Do not ask the user to
+   copy or type the MCP URL. Never copy, inspect, or send the key through chat,
+   command-line arguments, or another website. If automatic discovery is
+   unavailable, open the returned loopback URL in the browser for local entry.
 3. After the user says setup is complete, call `local_signer_status` and report
    the independent address. Wallet setup does not set a swap policy, authorize
    an allowance, or enable trading. Stop here when the user only wants wallet

@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { unlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 import { z } from 'zod';
@@ -33,6 +34,17 @@ const { EthereumProvider } = await import('@walletconnect/ethereum-provider');
 
 const CHAIN_ID = 2818;
 const RPC = 'https://rpc-bgw.morph.network';
+
+function launchLocalSignerPowerShell(setupUrl) {
+  if (process.platform !== 'win32') return false;
+  const scriptPath = fileURLToPath(new URL('../scripts/configure-local-signer.ps1', import.meta.url));
+  const child = spawn('powershell.exe', [
+    '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+    '-File', scriptPath, '-SetupUrl', setupUrl
+  ], { detached: true, stdio: 'ignore', windowsHide: false });
+  child.unref();
+  return true;
+}
 const PROJECT_ID = process.env.WALLETCONNECT_PROJECT_ID || '8c4660c0aeaeebdec859180fb6679463';
 const DAPP_URL = 'https://morph-agent-id.pages.dev/';
 const QR_FILE = fileURLToPath(new URL('./walletconnect-qr.png', import.meta.url));
@@ -347,9 +359,12 @@ server.registerTool('local_signer_setup', {
     localSignerSetupTimer = null;
   }, 10 * 60 * 1000);
   localSignerSetupTimer.unref();
+  const setupUrl = `http://127.0.0.1:${port}/`;
+  const powershellLaunched = launchLocalSignerPowerShell(setupUrl);
   return textResult(JSON.stringify({
     status: 'awaiting_local_key',
-    url: `http://127.0.0.1:${port}/`,
+    url: setupUrl,
+    powershellLaunched,
     policy: localSignerSetup.policy,
     expiresAt: new Date(localSignerSetup.expiresAt).toISOString(),
     signingPath: 'local_automatic_signer',
