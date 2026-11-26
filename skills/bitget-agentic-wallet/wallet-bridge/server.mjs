@@ -1,8 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { unlink, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 import { z } from 'zod';
@@ -10,9 +8,7 @@ import Ws from 'ws';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { resolveWalletConnectProxy } from './proxy.mjs';
 import { getMorphSwapQuote, MORPH_ASSETS } from './bgw-swap.mjs';
-import { randomBytes, randomUUID } from 'node:crypto';
-import { JsonRpcProvider } from 'ethers';
-import { createLocalSigner, signAndBroadcastMorph, waitForMorphReceipt } from './local-signer.mjs';
+import { randomUUID } from 'node:crypto';
 
 // Keep WalletConnect usable for users with direct internet access. If the
 // environment supplies a proxy, route only WalletConnect's WebSocket relay
@@ -35,16 +31,6 @@ const { EthereumProvider } = await import('@walletconnect/ethereum-provider');
 const CHAIN_ID = 2818;
 const RPC = 'https://rpc-bgw.morph.network';
 
-function launchLocalSignerPowerShell(setupUrl) {
-  if (process.platform !== 'win32') return false;
-  const scriptPath = fileURLToPath(new URL('../scripts/configure-local-signer.ps1', import.meta.url));
-  const child = spawn('powershell.exe', [
-    '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
-    '-File', scriptPath, '-SetupUrl', setupUrl
-  ], { detached: true, stdio: 'ignore', windowsHide: false });
-  child.unref();
-  return true;
-}
 const PROJECT_ID = process.env.WALLETCONNECT_PROJECT_ID || '8c4660c0aeaeebdec859180fb6679463';
 const DAPP_URL = 'https://morph-agent-id.pages.dev/';
 const QR_FILE = fileURLToPath(new URL('./walletconnect-qr.png', import.meta.url));
@@ -56,11 +42,6 @@ let pairingQrPath = null;
 let walletMode = 'light';
 const pendingSwapQuotes = new Map();
 const swapAuthorizations = new Map();
-let localSignerState = null;
-let localSignerServer = null;
-let localSignerSetup = null;
-let localSignerSetupTimer = null;
-let localSwapQueue = Promise.resolve();
 try { await unlink(QR_FILE); } catch { /* remove a stale QR from a previous bridge process */ }
 
 const server = new McpServer({ name: 'bitget-wallet-morph', version: '0.1.0' });
@@ -86,155 +67,6 @@ function requireProvider() {
   return provider;
 }
 
-function requireLocalSigner() {
-  if (!localSignerState) throw new Error('No local automatic signer is configured. Start local_signer_setup and submit the key in its local window.');
-  return localSignerState;
-}
-
-function serializeLocalSwap(action) {
-  const result = localSwapQueue.then(action, action);
-  localSwapQueue = result.catch(() => {});
-  return result;
-}
-
-function decimalToRaw(asset, amount) {
-  const [whole, fraction = ''] = amount.split('.');
-  if (fraction.length > asset.decimals) throw new Error(`Amount exceeds ${asset.decimals} decimal places.`);
-  const raw = BigInt(whole + fraction.padEnd(asset.decimals, '0'));
-  if (raw <= 0n) throw new Error('Amount must be greater than zero.');
-  return raw;
-}
-
-function buildLocalPolicy({ tokenIn, tokenOut, maxAmount, maxPerTrade, maxSlippage, durationMinutes, feeLimitWei }) {
-  if (tokenIn === tokenOut) throw new Error('The automatic signer needs two different tokens.');
-  const token = MORPH_ASSETS[tokenIn];
-  if (!token?.contract) throw new Error('Automatic swap input must be an ERC-20 token.');
-  const amountCapRaw = decimalToRaw(token, maxAmount);
-  const maxPerTradeRaw = decimalToRaw(token, maxPerTrade);
-  const slippageValue = Number(maxSlippage);
-  if (!Number.isFinite(slippageValue) || slippageValue <= 0 || slippageValue > 50) throw new Error('Maximum slippage must be greater than zero and no more than 50 percent.');
-  if (maxPerTradeRaw > amountCapRaw) throw new Error('Per-trade cap cannot exceed the cumulative amount cap.');
-  return { tokenIn, tokenOut, maxAmount, amountCapRaw: amountCapRaw.toString(), maxPerTrade, maxPerTradeRaw: maxPerTradeRaw.toString(), maxSlippage, durationMinutes, feeLimitWei, spender: null, approvalInitialized: false };
-}
-
-async function readProviderAllowance(provider, tokenAddress, owner, spender) {
-  const word = value => value.slice(2).toLowerCase().padStart(64, '0');
-  const data = `0xdd62ed3e${word(owner)}${word(spender)}`;
-  const result = await provider.send('eth_call', [{ to: tokenAddress, data }, 'latest']);
-  if (typeof result !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(result)) throw new Error('Could not verify the automatic signer allowance on Morph.');
-  return BigInt(result);
-}
-
-function localSignerPage(token, policy) {
-  const policyDetails = policy
-    ? `<div class="details"><strong>当前兑换策略</strong><br><span class="details-pair">${policy.tokenIn} → ${policy.tokenOut}</span><br>累计上限 ${policy.maxAmount} ${policy.tokenIn} · 单笔上限 ${policy.maxPerTrade} ${policy.tokenIn}<br>最大滑点 ${policy.maxSlippage}% · 有效期 ${policy.durationMinutes} 分钟</div>`
-    : '';
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'">
-  <title>Bitget Wallet开发者模式</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bgw-navy: #001F29;
-      --bgw-bg: #00080A;
-      --bgw-surface: #121717;
-      --bgw-surface-raised: #1B2122;
-      --bgw-cyan: #00F0FF;
-      --bgw-cta: #00E6F5;
-      --bgw-text: #FFFFFF;
-      --bgw-muted: #91A0A1;
-      --bgw-line: rgba(0, 240, 255, .18);
-      --bgw-radius-card: 20px;
-      --bgw-radius-control: 12px;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      color: var(--bgw-text);
-      font-family: "Causten Round", Inter, "AlibabaPuHuiTi", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-      background:
-        radial-gradient(circle at 80% -16%, rgba(0, 240, 255, .12), transparent 34%),
-        radial-gradient(circle at 8% 82%, rgba(0, 31, 41, .74), transparent 42%),
-        var(--bgw-bg);
-      padding: 32px 18px 28px;
-    }
-    .shell { width: min(100%, 760px); margin: 0 auto; }
-    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 72px; }
-    .brand { display: inline-flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; }
-    .brand-mark { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 13px; overflow: hidden; background: #fff; box-shadow: 0 10px 30px rgba(0, 240, 255, .12); }
-    .brand-mark svg { display: block; width: 100%; height: 100%; }
-    .brand-name { font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
-    .brand-name .tm { color: var(--bgw-cyan); font-size: 11px; vertical-align: top; margin-left: 2px; }
-    .brand-name small { display: block; margin-top: 4px; color: var(--bgw-muted); font-size: 10px; font-weight: 600; letter-spacing: .14em; }
-    .network-pill, .local-pill { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--bgw-line); border-radius: 999px; padding: 7px 11px; color: #B9F9FF; font-size: 11px; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
-    .network-pill::before { width: 6px; height: 6px; border-radius: 50%; background: var(--bgw-cyan); box-shadow: 0 0 12px var(--bgw-cyan); content: ''; }
-    .hero { margin-bottom: 28px; }
-    .eyebrow { margin: 0 0 14px; color: var(--bgw-cyan); font-size: 11px; font-weight: 700; letter-spacing: .16em; }
-    .hero h1 { margin: 0 0 14px; font-size: clamp(36px, 7vw, 58px); line-height: 1.04; letter-spacing: -.055em; }
-    .hero h1 span { color: var(--bgw-cyan); }
-    .hero p { max-width: 610px; margin: 0; color: var(--bgw-muted); font-size: 16px; line-height: 1.7; }
-    .card { padding: 24px; border: 1px solid rgba(255,255,255,.09); border-radius: var(--bgw-radius-card); background: linear-gradient(145deg, rgba(27,33,34,.96), rgba(18,23,23,.94)); box-shadow: 0 24px 70px rgba(0,0,0,.35); }
-    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
-    .card-head .eyebrow { margin: 0; }
-    .local-pill { color: var(--bgw-muted); border-color: rgba(145,160,161,.25); }
-    .notice { display: flex; gap: 12px; margin-bottom: 20px; padding: 15px 16px; border: 1px solid rgba(0, 240, 255, .24); border-radius: 14px; background: rgba(0, 31, 41, .72); color: #C2E8EA; line-height: 1.65; }
-    .notice strong { color: var(--bgw-text); }
-    .notice-icon { color: var(--bgw-cyan); font-size: 15px; line-height: 1.45; }
-    .details { margin: 0 0 20px; color: var(--bgw-muted); font-size: 13px; line-height: 1.75; }
-    .details strong { color: var(--bgw-text); }
-    .details-pair { display: inline-block; margin: 4px 0; color: var(--bgw-cyan); font-size: 18px; font-weight: 700; }
-    .intro { margin: 0 0 22px; color: var(--bgw-muted); font-size: 13px; line-height: 1.7; }
-    .field-label { display: block; margin-bottom: 8px; color: var(--bgw-text); font-size: 14px; font-weight: 700; }
-    .field-hint { margin: 0 0 10px; color: #718384; font-size: 12px; }
-    input, button { width: 100%; border-radius: var(--bgw-radius-control); font: inherit; }
-    input { padding: 14px; color: var(--bgw-text); background: #0B1112; border: 1px solid rgba(145,160,161,.34); outline: none; }
-    input::placeholder { color: #718384; }
-    input:focus { border-color: var(--bgw-cyan); box-shadow: 0 0 0 3px rgba(0,240,255,.14); }
-    button { margin-top: 14px; padding: 14px; color: #03313A; background: var(--bgw-cta); border: 0; font-weight: 800; cursor: pointer; box-shadow: 0 12px 26px rgba(0,240,255,.14); transition: transform .16s ease, background .16s ease; }
-    button:hover { background: #62EEF8; transform: translateY(-1px); }
-    button:focus-visible { outline: 3px solid rgba(0,240,255,.38); outline-offset: 2px; }
-    .footer { margin-top: 18px; color: #718384; font-size: 12px; text-align: center; }
-    @media (max-width: 560px) { body { padding-top: 22px; } .topbar { align-items: flex-start; margin-bottom: 54px; } .network-pill { display: none; } .card { padding: 20px; } }
-  </style>
-</head>
-<body>
-  <main class="shell">
-    <header class="topbar">
-      <div class="brand" aria-label="Bitget Wallet logo">
-        <span class="brand-mark">
-          <svg viewBox="0 0 256 256" fill="none" aria-hidden="true"><rect width="256" height="256" rx="60" fill="white"/><path d="M106.519 37.6134C96.1838 37.6081 85.8668 37.6029 75.4959 37.6187C69.2249 37.6187 66.8728 45.4915 71.5367 50.1548L142.135 120.753C144.338 122.768 145.712 124.958 145.762 127.846C145.712 130.733 144.338 132.923 142.135 134.938L71.5367 205.536C66.8728 210.2 69.2249 218.072 75.4959 218.072C85.8668 218.088 96.1838 218.083 106.519 218.078C111.693 218.075 116.872 218.072 122.064 218.072C128.857 218.072 132.897 214.444 136.526 210.815L200.196 147.145C205.278 142.063 209.824 135.316 209.763 127.846C209.824 120.375 205.278 113.628 200.196 108.547L136.526 44.8765C132.897 41.2477 128.857 37.6187 122.064 37.6187C116.872 37.6187 111.693 37.6161 106.519 37.6134Z" fill="#001F29"/></svg>
-        </span>
-        <span class="brand-name">Bitget Wallet<span class="tm">™</span><small>SECURE ON-DEVICE SIGNING</small></span>
-      </div>
-      <span class="network-pill">Morph Mainnet</span>
-    </header>
-    <section class="hero">
-      <p class="eyebrow">LOCAL SIGNER · DEVELOPER MODE</p>
-      <h1>Bitget Wallet<br><span>开发者模式</span></h1>
-      <p>配置一个独立的本地自动签名钱包，用于执行你明确授权范围内的操作。</p>
-    </section>
-    <section class="card">
-      <div class="card-head"><p class="eyebrow">ONE-TIME SETUP</p><span class="local-pill">127.0.0.1 · LOCAL ONLY</span></div>
-      <div class="notice"><div class="notice-icon">●</div><div><strong>私钥仅提交到本机</strong><br>私钥只发送到 127.0.0.1，成功后仅保存在当前 MCP 进程内存，不会写入文件或发送到远程服务。请使用独立自动交易钱包私钥，不要使用 Bitget Wallet 主钱包私钥。</div></div>
-      ${policyDetails}
-      <p class="intro">此步骤只配置本地签名器，不会授权额度，也不会执行兑换。后续策略需要单独设置。</p>
-      <form method="post" action="/submit?token=${encodeURIComponent(token)}">
-        <label class="field-label" for="privateKey">专用自动交易钱包私钥</label>
-        <p class="field-hint">输入内容不会显示，仅在本机内存中处理</p>
-        <input id="privateKey" name="privateKey" type="password" autocomplete="off" required pattern="0x[0-9a-fA-F]{64}" placeholder="0x + 64 位十六进制字符">
-        <button type="submit">在本机内存中启用</button>
-      </form>
-    </section>
-    <div class="footer">Morph Mainnet · Bitget Wallet Developer Mode</div>
-  </main>
-</body>
-</html>`;
-}
 async function connectedAccount() {
   const p = requireProvider();
   const accounts = await p.request({ method: 'eth_accounts' });
@@ -334,22 +166,22 @@ server.registerTool('wallet_status', {
 
 server.registerTool('wallet_set_mode', {
   title: 'Set wallet operating mode',
-  description: 'Set this bridge session to lightweight or explicitly acknowledged developer mode. Developer mode supports either Bitget Wallet signing or a separate local automatic signer. The local signer uses a dedicated wallet key entered in the local-only setup window and is governed by an explicit policy.',
+  description: 'Set this bridge session to lightweight or explicitly acknowledged developer mode. Developer mode enables bounded swap authorization and contract deployment while Bitget Wallet remains the signing device.',
   inputSchema: {
     mode: z.enum(['light', 'developer']),
     acknowledgement: z.string().optional()
   }
 }, async ({ mode, acknowledgement }) => {
   const accepted = [
-    'I understand developer mode can automatically sign in-scope transactions with a separate local automation wallet, and that key controls that wallet.',
-    '我明白开发者模式可用独立的本地自动交易钱包自动签署授权范围内的交易，私钥拥有该钱包的控制权。'
+    'I understand developer mode enables bounded swap authorization and contract deployment, and Bitget Wallet remains the signing device.',
+    '我明白开发者模式用于受限额度授权和合约开发，交易仍由 Bitget Wallet 审核并签名。'
   ];
   if (mode === 'developer' && !accepted.includes(acknowledgement || '')) {
-    throw new Error('Developer mode requires an explicit acknowledgement of the separate local automation wallet and its private-key control.');
+    throw new Error('Developer mode requires an explicit acknowledgement that Bitget Wallet remains the signing device.');
   }
   walletMode = mode;
   if (mode === 'light') swapAuthorizations.clear();
-  return textResult(JSON.stringify({ mode: walletMode, signing: mode === 'developer' ? 'Select Bitget Wallet or the separately configured local automation signer' : 'Bitget Wallet approval required for writes' }));
+  return textResult(JSON.stringify({ mode: walletMode, signing: mode === 'developer' ? 'Bitget Wallet approval required for writes' : 'Bitget Wallet approval required for writes' }));
 });
 
 server.registerTool('wallet_disconnect', {
@@ -367,295 +199,6 @@ server.registerTool('wallet_disconnect', {
   swapAuthorizations.clear();
   return textResult('WalletConnect session disconnected from this assistant bridge.');
 });
-
-server.registerTool('local_signer_setup', {
-  title: 'Open local automatic signer setup',
-  description: 'In acknowledged developer mode, open a loopback-only setup window where the user enters an independent Morph automation-wallet private key. The key is never returned, logged, persisted, or sent to a remote service. This step only configures the signer. Set a swap policy separately with local_signer_policy_set before trading.',
-  inputSchema: {}
-}, async () => {
-  if (walletMode !== 'developer') throw new Error('Automatic signing requires acknowledged developer mode.');
-  if (localSignerState) throw new Error('A local automatic signer is already configured. Revoke its allowance and disconnect it before replacing the signer.');
-  if (localSignerServer) throw new Error('A local signer setup window is already open. Submit it or wait for it to expire.');
-  const sessionToken = randomBytes(24).toString('hex');
-  localSignerSetup = {
-    token: sessionToken,
-    policy: null,
-    expiresAt: Date.now() + 10 * 60 * 1000
-  };
-  localSignerServer = createServer(async (request, response) => {
-    const requestUrl = new URL(request.url || '/', 'http://127.0.0.1');
-    response.setHeader('cache-control', 'no-store');
-    response.setHeader('referrer-policy', 'no-referrer');
-    response.setHeader('x-content-type-options', 'nosniff');
-    response.setHeader('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
-    response.setHeader('x-frame-options', 'DENY');
-    const expectedHost = `127.0.0.1:${localSignerServer.address()?.port}`;
-    if (request.headers.host !== expectedHost) {
-      response.writeHead(403); response.end('Local host check failed.'); return;
-    }
-    if (requestUrl.pathname === '/' && request.method === 'GET') {
-      if (localSignerSetup.expiresAt <= Date.now()) { response.writeHead(410); response.end('Setup window expired.'); return; }
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      response.end(localSignerPage(sessionToken, localSignerSetup.policy));
-      return;
-    }
-    if (requestUrl.pathname === '/submit' && request.method === 'POST' && requestUrl.searchParams.get('token') === sessionToken) {
-      if (localSignerSetup.expiresAt <= Date.now()) { response.writeHead(410); response.end('Setup window expired.'); return; }
-      const origin = request.headers.origin;
-      if (origin && origin !== 'null' && origin !== `http://${expectedHost}`) {
-        response.writeHead(403); response.end('Local origin check failed.'); return;
-      }
-      if (!String(request.headers['content-type'] || '').startsWith('application/x-www-form-urlencoded')) {
-        response.writeHead(415); response.end('Unsupported form content type.'); return;
-      }
-      if (localSignerSetup.submitting) {
-        response.writeHead(409); response.end('A key submission is already being processed.'); return;
-      }
-      if (Number(request.headers['content-length'] || 0) > 2048) {
-        response.writeHead(413); response.end('Request body is too large.'); return;
-      }
-      localSignerSetup.submitting = true;
-      const bodyChunks = [];
-      let bodyBytes = 0;
-      request.on('data', chunk => {
-        if (response.writableEnded) return;
-        bodyBytes += chunk.length;
-        if (bodyBytes > 2048) {
-          response.writeHead(413); response.end('Request body is too large.');
-          request.resume();
-          return;
-        }
-        bodyChunks.push(chunk);
-      });
-      request.on('end', async () => {
-        try {
-          if (response.writableEnded || bodyBytes > 2048) return;
-          const params = new URLSearchParams(Buffer.concat(bodyChunks).toString('utf8'));
-          const privateKey = params.get('privateKey') || '';
-          const signer = createLocalSigner(privateKey);
-          const provider = new JsonRpcProvider(RPC, Number(CHAIN_ID));
-          localSignerState = { signer, provider, policy: localSignerSetup.policy, createdAt: Date.now(), expiresAt: localSignerSetup.policy ? Date.now() + localSignerSetup.policy.durationMinutes * 60 * 1000 : null };
-          response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-          response.end('<h1>已启用</h1><p>自动交易签名器已在本机内存中启用。可以关闭此窗口。</p>');
-          clearTimeout(localSignerSetupTimer);
-          localSignerSetupTimer = null;
-          localSignerServer.close();
-          localSignerServer = null;
-          localSignerSetup = null;
-        } catch (error) {
-          response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
-          response.end(error?.message || 'Invalid local signer.');
-        } finally {
-          if (localSignerSetup) localSignerSetup.submitting = false;
-        }
-      });
-      return;
-    }
-    response.writeHead(404); response.end();
-  });
-  await new Promise((resolve, reject) => { localSignerServer.once('error', reject); localSignerServer.listen(0, '127.0.0.1', resolve); });
-  const port = localSignerServer.address().port;
-  localSignerSetupTimer = setTimeout(() => {
-    if (localSignerSetup?.token !== sessionToken) return;
-    localSignerServer?.close();
-    localSignerServer = null;
-    localSignerSetup = null;
-    localSignerSetupTimer = null;
-  }, 10 * 60 * 1000);
-  localSignerSetupTimer.unref();
-  const setupUrl = `http://127.0.0.1:${port}/`;
-  const powershellLaunched = launchLocalSignerPowerShell(setupUrl);
-  return textResult(JSON.stringify({
-    status: 'awaiting_local_key',
-    url: setupUrl,
-    powershellLaunched,
-    policy: localSignerSetup.policy,
-    expiresAt: new Date(localSignerSetup.expiresAt).toISOString(),
-    signingPath: 'local_automatic_signer',
-    warning: 'This is a separate automation wallet. It is not the connected Bitget Wallet address.'
-  }));
-});
-
-server.registerTool('local_signer_status', {
-  title: 'Check local automatic signer',
-  description: 'Return the independent local signer address and policy without exposing its private key. Resolve the status of a previously broadcast allowance transaction before retrying.',
-  inputSchema: {}
-}, async () => {
-  if (!localSignerState) return textResult(JSON.stringify({ status: 'not_configured' }));
-  if (!localSignerState.policy) {
-    return textResult(JSON.stringify({
-      status: 'configured',
-      address: localSignerState.signer.address,
-      policy: null,
-      expiresAt: null,
-      signingPath: 'local_automatic_signer'
-    }));
-  }
-  let pendingApproval = null;
-  const approvalHash = localSignerState.policy.pendingApprovalHash;
-  if (approvalHash) {
-    const receipt = await localSignerState.provider.send('eth_getTransactionReceipt', [approvalHash]);
-    if (!receipt) {
-      pendingApproval = { status: 'pending', hash: approvalHash };
-    } else if (BigInt(receipt.status) !== 1n) {
-      delete localSignerState.policy.pendingApprovalHash;
-      pendingApproval = { status: 'failed', hash: approvalHash, receipt };
-    } else {
-      const allowance = await readProviderAllowance(
-        localSignerState.provider,
-        MORPH_ASSETS[localSignerState.policy.tokenIn].contract,
-        localSignerState.signer.address,
-        localSignerState.policy.spender
-      );
-      if (allowance !== BigInt(localSignerState.policy.amountCapRaw)) {
-        pendingApproval = { status: 'allowance_mismatch', hash: approvalHash, allowance: allowance.toString() };
-      } else {
-        localSignerState.policy.approvalInitialized = true;
-        delete localSignerState.policy.pendingApprovalHash;
-        pendingApproval = { status: 'confirmed', hash: approvalHash, allowance: allowance.toString() };
-      }
-    }
-  }
-  const revokeHash = localSignerState.policy.pendingRevokeHash;
-  let pendingRevoke = null;
-  if (revokeHash) {
-    const receipt = await localSignerState.provider.send('eth_getTransactionReceipt', [revokeHash]);
-    if (!receipt) {
-      pendingRevoke = { status: 'pending', hash: revokeHash };
-    } else if (BigInt(receipt.status) !== 1n) {
-      delete localSignerState.policy.pendingRevokeHash;
-      pendingRevoke = { status: 'failed', hash: revokeHash, receipt };
-    } else {
-      const asset = MORPH_ASSETS[localSignerState.policy.tokenIn];
-      const allowance = await readProviderAllowance(localSignerState.provider, asset.contract, localSignerState.signer.address, localSignerState.policy.spender);
-      if (allowance !== 0n) {
-        pendingRevoke = { status: 'allowance_mismatch', hash: revokeHash, allowance: allowance.toString() };
-      } else {
-        localSignerState.policy.approvalInitialized = false;
-        delete localSignerState.policy.pendingRevokeHash;
-        pendingRevoke = { status: 'confirmed', hash: revokeHash, allowance: '0' };
-      }
-    }
-  }
-  const swapHash = localSignerState.policy.pendingSwapHash;
-  let pendingSwap = null;
-  if (swapHash) {
-    const receipt = await localSignerState.provider.send('eth_getTransactionReceipt', [swapHash]);
-    if (!receipt) {
-      pendingSwap = { status: 'pending', hash: swapHash };
-    } else {
-      delete localSignerState.policy.pendingSwapHash;
-      pendingSwap = { status: BigInt(receipt.status) === 1n ? 'confirmed' : 'failed', hash: swapHash, receipt };
-    }
-  }
-  let allowanceStatus = null;
-  if (localSignerState.policy.spender) {
-    const asset = MORPH_ASSETS[localSignerState.policy.tokenIn];
-    const allowanceRemainingRaw = await readProviderAllowance(
-      localSignerState.provider,
-      asset.contract,
-      localSignerState.signer.address,
-      localSignerState.policy.spender
-    );
-    allowanceStatus = {
-      token: localSignerState.policy.tokenIn,
-      spender: localSignerState.policy.spender,
-      initialCapRaw: localSignerState.policy.amountCapRaw,
-      allowanceRemainingRaw: allowanceRemainingRaw.toString()
-    };
-  }
-  return textResult(JSON.stringify({
-    status: localSignerState.expiresAt > Date.now() ? 'active' : 'expired',
-    address: localSignerState.signer.address,
-    policy: localSignerState.policy,
-    pendingApproval,
-    pendingRevoke,
-    pendingSwap,
-    allowance: allowanceStatus,
-    expiresAt: new Date(localSignerState.expiresAt).toISOString(),
-    signingPath: 'local_automatic_signer'
-  }));
-});
-
-server.registerTool('local_signer_disconnect', {
-  title: 'Disable local automatic signer',
-  description: 'Erase the local signer object and policy from this MCP process memory after confirming its configured on-chain allowance is zero. Revoke the allowance first if needed.',
-  inputSchema: {}
-}, async () => {
-  return serializeLocalSwap(async () => {
-  if (localSignerServer) { localSignerServer.close(); localSignerServer = null; }
-  clearTimeout(localSignerSetupTimer);
-  localSignerSetupTimer = null;
-  localSignerSetup = null;
-  if (localSignerState?.policy?.spender) {
-    const asset = MORPH_ASSETS[localSignerState.policy.tokenIn];
-    const allowance = await readProviderAllowance(localSignerState.provider, asset.contract, localSignerState.signer.address, localSignerState.policy.spender);
-    if (allowance !== 0n || localSignerState.policy.pendingApprovalHash || localSignerState.policy.pendingRevokeHash || localSignerState.policy.pendingSwapHash) {
-      throw new Error('The local signer still has a nonzero allowance or unresolved transaction. Check status, revoke the allowance, and retry disconnect.');
-    }
-  }
-  localSignerState = null;
-  return textResult('Local automatic signer disabled and cleared from this MCP process.');
-  });
-});
-
-server.registerTool('local_signer_policy_set', {
-  title: 'Set local signer swap policy',
-  description: 'Attach a bounded swap policy to an already configured local signer. This does not open the key-injection page, create an allowance, or submit a transaction. The policy duration starts when this tool is called.',
-  inputSchema: {
-    tokenIn: z.enum(['BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
-    tokenOut: z.enum(['ETH', 'BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
-    maxAmount: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
-    maxPerTrade: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
-    maxSlippage: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/),
-    durationMinutes: z.number().int().min(1).max(10080),
-    feeLimitWei: z.string().regex(/^[1-9][0-9]*$/).default('10000000000000000')
-  }
-}, async ({ tokenIn, tokenOut, maxAmount, maxPerTrade, maxSlippage, durationMinutes, feeLimitWei }) => {
-  if (walletMode !== 'developer') throw new Error('Automatic signing requires acknowledged developer mode.');
-  const local = requireLocalSigner();
-  if (local.policy) throw new Error('A local swap policy is already set. Revoke any allowance and disconnect the signer before setting a different policy.');
-  const policy = buildLocalPolicy({ tokenIn, tokenOut, maxAmount, maxPerTrade, maxSlippage, durationMinutes, feeLimitWei });
-  local.policy = policy;
-  local.expiresAt = Date.now() + durationMinutes * 60 * 1000;
-  return textResult(JSON.stringify({ status: 'policy_active', address: local.signer.address, policy, expiresAt: new Date(local.expiresAt).toISOString(), signingPath: 'local_automatic_signer', allowanceCreated: false }));
-});
-
-server.registerTool('local_allowance_revoke', {
-  title: 'Revoke local automatic-signer allowance',
-  description: 'Set the configured local automation wallet ERC-20 allowance for its swap router to zero, wait for the receipt, and verify the on-chain allowance. This broadcasts a transaction with the local signer and does not open Bitget Wallet.',
-  inputSchema: {}
-}, async () => serializeLocalSwap(async () => {
-  const local = requireLocalSigner();
-  if (!local.policy) throw new Error('No swap policy is configured for this local signer.');
-  if (walletMode !== 'developer') throw new Error('Automatic signing is disabled outside developer mode.');
-  const { tokenIn, spender, feeLimitWei } = local.policy;
-  const asset = MORPH_ASSETS[tokenIn];
-  if (!asset?.contract || !spender) throw new Error('No ERC-20 token and router allowance is configured for this local signer. Request a local quote first.');
-  if (local.policy.pendingApprovalHash) throw new Error(`Resolve pending transaction ${local.policy.pendingApprovalHash} before revoking the allowance.`);
-  if (local.policy.pendingRevokeHash) throw new Error(`A local allowance revoke is already pending. Inspect ${local.policy.pendingRevokeHash} with local_signer_status.`);
-  const allowance = await readProviderAllowance(local.provider, asset.contract, local.signer.address, spender);
-  if (allowance === 0n) {
-    local.policy.approvalInitialized = false;
-    return textResult(JSON.stringify({ revoked: true, status: 'already_zero', token: tokenIn, spender, allowance: '0' }));
-  }
-  const approveData = `0x095ea7b3${spender.slice(2).toLowerCase().padStart(64, '0')}${'0'.repeat(64)}`;
-  let transaction;
-  try {
-    transaction = await signAndBroadcastMorph({ signer: local.signer, provider: local.provider, transaction: { to: asset.contract, data: approveData, value: '0' }, feeLimitWei });
-  } catch (error) {
-    if (error?.transactionHash) local.policy.pendingRevokeHash = error.transactionHash;
-    throw error;
-  }
-  local.policy.pendingRevokeHash = transaction.hash;
-  const receipt = await waitForMorphReceipt(local.provider, transaction.hash);
-  if (BigInt(receipt.status) !== 1n) throw new Error(`Allowance revoke failed. Inspect ${transaction.hash} before retrying.`);
-  const remainingAllowance = await readProviderAllowance(local.provider, asset.contract, local.signer.address, spender);
-  if (remainingAllowance !== 0n) throw new Error(`Revoke receipt succeeded but allowance is ${remainingAllowance}. Inspect ${transaction.hash}.`);
-  local.policy.approvalInitialized = false;
-  delete local.policy.pendingRevokeHash;
-  return textResult(JSON.stringify({ revoked: true, status: 'confirmed', token: tokenIn, spender, previousAllowance: allowance.toString(), allowance: '0', hash: transaction.hash, receipt }));
-}));
 
 server.registerTool('wallet_read', {
   title: 'Read Morph chain data',
@@ -756,117 +299,6 @@ server.registerTool('swap_quote', {
     approvalRequired: allowance !== null && BigInt(allowance) < BigInt(exactInputAmount)
   }));
 });
-
-server.registerTool('local_swap_quote', {
-  title: 'Get an automatic-signer swap quote',
-  description: 'Get a quote for the independent local automation wallet. The quote is bounded by the configured token pair, cumulative amount cap, and expiration policy.',
-  inputSchema: {
-    tokenIn: z.enum(['BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
-    tokenOut: z.enum(['ETH', 'BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
-    amount: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
-    slippage: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/).default('1')
-  }
-}, async ({ tokenIn, tokenOut, amount, slippage }) => {
-  const local = requireLocalSigner();
-  if (!local.policy) throw new Error('No swap policy is configured. Call local_signer_policy_set after the local wallet is ready.');
-  if (local.expiresAt <= Date.now()) throw new Error('The local automatic signer policy expired. Configure a new local signer session.');
-  if (walletMode !== 'developer') throw new Error('Automatic signing is disabled outside developer mode.');
-  if (local.policy.tokenIn !== tokenIn || local.policy.tokenOut !== tokenOut) throw new Error('The swap pair is outside the active automatic signer policy.');
-  const asset = MORPH_ASSETS[tokenIn];
-  const requestedRaw = decimalToRaw(asset, amount);
-  if (requestedRaw > BigInt(local.policy.maxPerTradeRaw)) throw new Error('The swap exceeds the configured per-trade amount cap.');
-  if (Number(slippage) > Number(local.policy.maxSlippage)) throw new Error('The requested slippage exceeds the configured policy maximum.');
-  const result = await getMorphSwapQuote({ tokenIn, tokenOut, amount, slippage, address: local.signer.address });
-  if (local.policy.spender && local.policy.spender.toLowerCase() !== result.transaction.to.toLowerCase()) throw new Error('The quote router differs from the spender authorized for this session.');
-  local.policy.spender ||= result.transaction.to;
-  const allowanceRemaining = await readProviderAllowance(local.provider, asset.contract, local.signer.address, result.transaction.to);
-  const quoteId = randomUUID();
-  const expiresAt = Math.min(Date.now() + 300000, local.expiresAt);
-  pendingSwapQuotes.set(quoteId, { ...result, address: local.signer.address, expiresAt, signingPath: 'local_automatic_signer' });
-  return textResult(JSON.stringify({
-    ...result,
-    quoteId,
-    expiresAt: new Date(expiresAt).toISOString(),
-    signingPath: 'local_automatic_signer',
-    automationPolicy: local.policy,
-    allowanceBudget: {
-      initialCapRaw: local.policy.amountCapRaw,
-      allowanceRemainingRaw: allowanceRemaining.toString(),
-      firstApprovalRequired: !local.policy.approvalInitialized
-    }
-  }));
-});
-
-server.registerTool('local_swap_execute', {
-  title: 'Execute an automatic-signer swap',
-  description: 'Automatically approve the configured cumulative cap on the first swap, sign the quoted Morph swap locally, broadcast it, and wait for a receipt. The first execution requires an explicit acknowledgement after showing the router, policy, allowance amount, fees, and swap quote. Later user-requested swaps within the active policy do not require another acknowledgement. No Bitget Wallet popup is used.',
-  inputSchema: { quoteId: z.string().uuid(), authorization: z.string().optional() }
-}, async ({ quoteId, authorization }) => serializeLocalSwap(async () => {
-  const local = requireLocalSigner();
-  if (!local.policy) throw new Error('No swap policy is configured. Call local_signer_policy_set after the local wallet is ready.');
-  if (local.expiresAt <= Date.now()) throw new Error('The local automatic signer policy expired.');
-  if (walletMode !== 'developer') throw new Error('Automatic signing is disabled outside developer mode.');
-  const quote = await getSwapQuote(quoteId, local.signer.address);
-  pendingSwapQuotes.delete(quoteId);
-  if (quote.signingPath !== 'local_automatic_signer') throw new Error('This quote belongs to the Bitget Wallet signing path.');
-  if (quote.tokenIn !== local.policy.tokenIn || quote.tokenOut !== local.policy.tokenOut) throw new Error('The quote is outside the active automatic signer policy.');
-  const asset = MORPH_ASSETS[quote.tokenIn];
-  const exactAmount = decimalToRaw(asset, quote.amount);
-  if (exactAmount > BigInt(local.policy.maxPerTradeRaw)) throw new Error('The swap exceeds the configured per-trade amount cap.');
-  if (Number(quote.slippage) > Number(local.policy.maxSlippage)) throw new Error('The quote exceeds the configured slippage maximum.');
-  if (!local.policy.spender || local.policy.spender.toLowerCase() !== quote.transaction.to.toLowerCase()) throw new Error('The quote router differs from the spender authorized for this session.');
-  const allowance = await readProviderAllowance(local.provider, asset.contract, local.signer.address, quote.transaction.to);
-  const maxAmount = BigInt(local.policy.amountCapRaw);
-  let approvalHash = null;
-  if (local.policy.pendingApprovalHash) {
-    throw new Error(`A local allowance transaction is unresolved. Call local_signer_status and inspect ${local.policy.pendingApprovalHash} before continuing.`);
-  }
-  if (local.policy.pendingRevokeHash) {
-    throw new Error(`A local allowance revoke is unresolved. Call local_signer_status and inspect ${local.policy.pendingRevokeHash} before continuing.`);
-  }
-  if (!local.policy.approvalInitialized) {
-    const acknowledgements = [
-      'I authorize the displayed local swap policy, router allowance, and this swap.',
-      '我确认授权已展示的本地兑换策略、路由器额度授权和本次兑换。'
-    ];
-    if (!acknowledgements.includes(authorization || '')) {
-      throw new Error('The first local swap requires the exact authorization acknowledgement after the user reviews the router, cumulative allowance, fee cap, expiry, and quote.');
-    }
-    local.policy.authorizationAcknowledged = true;
-    if (allowance !== 0n) throw new Error('The automation wallet already has an allowance for this spender. Revoke and verify it before activating the session.');
-    const approveData = `0x095ea7b3${quote.transaction.to.slice(2).toLowerCase().padStart(64, '0')}${maxAmount.toString(16).padStart(64, '0')}`;
-    let approval;
-    try {
-      approval = await signAndBroadcastMorph({ signer: local.signer, provider: local.provider, transaction: { to: asset.contract, data: approveData, value: '0' }, feeLimitWei: local.policy.feeLimitWei });
-    } catch (error) {
-      if (error?.transactionHash) local.policy.pendingApprovalHash = error.transactionHash;
-      throw error;
-    }
-    approvalHash = approval.hash;
-    local.policy.pendingApprovalHash = approval.hash;
-    const approvalReceipt = await waitForMorphReceipt(local.provider, approval.hash);
-    if (approvalReceipt.status !== '0x1') throw new Error(`Automatic signer approval failed. Inspect ${approval.hash} before retrying.`);
-    local.policy.approvalInitialized = true;
-    delete local.policy.pendingApprovalHash;
-  }
-  if (local.expiresAt <= Date.now()) throw new Error('The local automatic signer policy expired before swap broadcast.');
-  const remainingAllowance = await readProviderAllowance(local.provider, asset.contract, local.signer.address, quote.transaction.to);
-  if (remainingAllowance < exactAmount) throw new Error('The session cumulative allowance is exhausted or too small for this swap.');
-  if (remainingAllowance > maxAmount) throw new Error('On-chain allowance exceeds the configured cumulative session cap.');
-  let transaction;
-  try {
-    transaction = await signAndBroadcastMorph({ signer: local.signer, provider: local.provider, transaction: quote.transaction, feeLimitWei: local.policy.feeLimitWei });
-  } catch (error) {
-    if (error?.transactionHash) local.policy.pendingSwapHash = error.transactionHash;
-    throw error;
-  }
-  local.policy.pendingSwapHash = transaction.hash;
-  const receipt = await waitForMorphReceipt(local.provider, transaction.hash);
-  if (receipt.status !== '0x1') throw new Error(`Automatic signer swap failed. Inspect ${transaction.hash} before retrying.`);
-  delete local.policy.pendingSwapHash;
-  const allowanceRemaining = await readProviderAllowance(local.provider, asset.contract, local.signer.address, quote.transaction.to);
-  return textResult(JSON.stringify({ submitted: true, confirmed: true, signingPath: 'local_automatic_signer', network: 'Morph Mainnet', chainId: 2818, wallet: local.signer.address, tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amount: quote.amount, estimatedOutput: quote.estimatedOutput, minimumOutput: quote.minimumOutput, allowanceBudget: { initialCapRaw: local.policy.amountCapRaw, allowanceRemainingRaw: allowanceRemaining.toString() }, approvalHash, hash: transaction.hash, receipt }));
-}));
 
 server.registerTool('swap_authorize_session', {
   title: 'Authorize a bounded swap session',

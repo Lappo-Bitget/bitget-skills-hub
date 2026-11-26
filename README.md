@@ -2,11 +2,11 @@
 
 Codex Skill for connecting Bitget Wallet to Morph Mainnet through WalletConnect.
 It supports Agent ID reads, read-only Morph RPC queries, user-approved wallet
-transactions, and an explicitly selected local Hardhat build/deploy workflow.
-The WalletConnect path keeps keys and signatures inside Bitget Wallet. The
-optional local automatic-swap path uses a separate wallet whose key the user
-enters in a loopback-only local page. The Hardhat path is separate and requires
-a host-configured secret provider. No path accepts keys in chat.
+transactions, bounded developer-mode swaps, and an explicitly selected local
+Hardhat build/deploy workflow. WalletConnect keeps keys and signatures inside
+Bitget Wallet. The Hardhat path is separate and requires a host-configured
+secret provider. No user wallet key is entered into this repository, a local
+configuration page, or chat.
 
 ## Install the skill
 
@@ -75,40 +75,11 @@ If either secret is missing, the proxy returns a configuration error and
 are separate wallet confirmations, and the bridge never bypasses Bitget Wallet
 signing.
 
-For repeated swaps, the developer mode offers two separate signing paths. The
-Bitget Wallet path authorizes one chosen input token, cumulative amount cap,
-and duration of up to seven days for a specific router spender. Bitget Wallet
-still asks the user to sign each transaction. The local automatic-swap path
-uses a dedicated wallet injected by the user through a `127.0.0.1` page and
-signs the bounded approval and in-scope swaps locally without BGW popups. The
-user must still request every swap. Both paths enforce a time window in the
-bridge and an input amount cap with an ERC-20 allowance. ERC-20 allowances have
-no native expiry, so unused allowance remains until it is spent or explicitly
-revoked. See `skills/bitget-agentic-wallet/SKILL.md` for the local window,
-policy, status, and revoke workflow.
-
-### Configure the local signer from PowerShell
-
-After the MCP tool `local_signer_setup` starts a session, double-click
-`configure-local-signer.cmd`. The launcher automatically discovers the active
-Bitget Wallet loopback session. The user only enters the private key. It does
-not ask for an MCP URL:
-
-```text
-skills\bitget-agentic-wallet\scripts\configure-local-signer.cmd
-```
-
-The script can also be run directly by the skill with the returned URL:
-
-```powershell
-pwsh -NoProfile -File .\skills\bitget-agentic-wallet\scripts\configure-local-signer.ps1 `
-  -SetupUrl http://127.0.0.1:<port>/
-```
-
-The script fetches the one-time form token from that URL, reads the key with
-`Read-Host -AsSecureString`, and submits it only to the loopback bridge. It
-does not save, print, or send the key to a remote service. The MCP session
-must remain running until the submission completes.
+For repeated swaps, developer mode uses the connected Bitget Wallet. It
+authorizes one chosen input token, cumulative amount cap, and duration of up to
+seven days for a specific router spender. Bitget Wallet still asks the user to
+sign each transaction. The bridge enforces the time window and input amount cap,
+while the ERC-20 allowance remains until spent or explicitly revoked.
 
 ## Network proxy
 
@@ -132,11 +103,8 @@ git config core.hooksPath .githooks
 
 ## Security
 
-The bridge never accepts keys in chat. The optional local automatic-swap
-signer accepts a dedicated wallet key only through its loopback injection page
-and keeps the signing object in process memory. The user must understand that
-this key controls that wallet and that the bounded ERC-20 allowance has no
-on-chain expiry. WalletConnect transactions remain reviewed and signed in
+The bridge never accepts wallet keys in chat, terminal prompts, or local
+configuration pages. WalletConnect transactions remain reviewed and signed in
 Bitget Wallet. Hardhat deployment is available only when the host supplies
 `MORPH_DEPLOYER_PRIVATE_KEY` through a trusted secret provider. The value is
 never printed, persisted, or committed. See
