@@ -167,14 +167,6 @@ action per view and verify desktop and narrow-screen layouts before delivery.
 - Use `wallet_send_transaction` for lightweight-mode calls and transfers. In
   developer mode, route writes through the local signer capability exposed by
   the MCP. If that capability is unavailable, stop and report the setup gap.
- - **GetGas:** GetGas is a Bitget Wallet app-level prepaid gas account. The user
-   tops it up once from Wallet > GetGas with a supported asset, then Bitget
-   Wallet can use that balance to pay fees for supported transactions across
-   multiple chains. For a transaction, use the normal `wallet_send_transaction`
-   flow and let Bitget Wallet select GetGas. Do not replace this with a NoGas
-   Swap order, do not fabricate a GetGas API, and do not pass `feeTokenID` or
-   `feeLimit` as a substitute. Top-up and GetGas balance management stay inside
-   the Bitget Wallet app because this skill has no public GetGas account API.
 - Use `wallet_deploy_contract` only for lightweight-mode Bitget Wallet
   deployment. Developer-mode deployment requires a local signer deployment
   tool and must not fall back to a Bitget Wallet approval popup.
@@ -258,6 +250,19 @@ string. The selector is limited to ETH, BGB, USDC, USDT0, USDe, USD1, and WETH.
 If the shared proxy reports credentials are not configured or the API rejects
 the account, report that response and stop. Never ask users to paste API
 credentials into chat or local skill files.
+
+For Bitget Wallet GetGas, use the official `NoGas` Order Mode flow through the
+`get_gas` MCP tool. This is gas-sponsored swap execution, not a standalone
+native-token faucet. The tool supports the stablecoin catalog, checks that the
+official `getSwapPrice` response includes `features: ["no_gas"]`, and creates a
+`makeSwapOrder` request with `feature: "no_gas"`. EVM responses contain EIP-712
+signature requests instead of ordinary transaction calldata. Show the pair,
+minimum received, market, expiry, order ID, and signing hashes before calling
+`swap_execute`. That tool signs each returned hash with `eth_sign` in Bitget
+Wallet and submits the signatures through the official `submitSwapOrder`
+endpoint. No native gas balance or ERC-20 approval is required on this path. If
+`no_gas` is absent, report that the official capability is unavailable for the
+selected pair.
 
 Before the user signs, show the pair, amount, minimum received, slippage, market,
 transaction target, value, and expiry. The quote tool checks ERC-20 allowance
