@@ -34,12 +34,6 @@ function formatAmount(raw, decimals) {
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
-function decimalRaw(value, decimals) {
-  if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(value)) return null;
-  const [whole, fraction = ''] = value.split('.');
-  return BigInt(whole + fraction.padEnd(decimals, '0'));
-}
-
 function validateSlippage(value) {
   if (typeof value !== 'string' || value.length > 5 || !SLIPPAGE.test(value)) {
     throw new Error('slippage must be a decimal percentage with at most two decimal places.');
@@ -75,12 +69,7 @@ async function requestProxy(body, proxyUrl, fetchImpl) {
     const responseText = await response.text();
     if (responseText.length > 1048576) throw new Error('Bitget Wallet Swap response exceeded 1 MiB.');
     const result = JSON.parse(responseText);
-    const validBody = result?.mode === 'no_gas_submit'
-      ? Boolean(result.result)
-      : result?.mode === 'no_gas'
-        ? Boolean(result.quote && result.order)
-        : Boolean(result.quote && result.transaction);
-    if (result?.provider !== 'Bitget Wallet' || !validBody) {
+    if (result?.provider !== 'Bitget Wallet' || !result.quote || !result.transaction) {
       throw new Error('Bitget Wallet Swap proxy returned an invalid response.');
     }
     return result;
@@ -145,86 +134,4 @@ export async function getMorphSwapQuote({ tokenIn, tokenOut, amount, slippage, a
       value: transaction.value
     }
   };
-}
-
-export async function getMorphNoGasOrder({ tokenIn, tokenOut, amount, slippage, address }, {
-  proxyUrl = process.env.BGW_SWAP_PROXY_URL || DEFAULT_SWAP_PROXY,
-  fetchImpl = globalThis.fetch
-} = {}) {
-  const input = MORPH_ASSETS[tokenIn];
-  const output = MORPH_ASSETS[tokenOut];
-  if (!input || !output || tokenIn === tokenOut) throw new Error('Select two different supported Morph assets.');
-  if (!ADDRESS.test(address || '') || /^0x0{40}$/i.test(address)) throw new Error('Connected Morph wallet address is invalid.');
-  validateSlippage(slippage);
-  const amountWei = rawAmount(input, amount);
-  let parsedProxy;
-  try { parsedProxy = new URL(proxyUrl); } catch { throw new Error('BGW_SWAP_PROXY_URL must be a valid HTTPS URL.'); }
-  if (parsedProxy.protocol !== 'https:') throw new Error('BGW_SWAP_PROXY_URL must use HTTPS.');
-  const response = await requestProxy({
-    mode: 'no_gas',
-    tokenInAddress: input.contract,
-    tokenOutAddress: output.contract,
-    amount: amountWei,
-    slippage: (Number(slippage) / 100).toString(),
-    recipient: address
-  }, parsedProxy.toString(), fetchImpl);
-  if (response.mode !== 'no_gas' || !response.order || !Array.isArray(response.order.signatures)) {
-    throw new Error('Bitget Wallet NoGas returned an invalid order.');
-  }
-  const features = Array.isArray(response.quote?.features) ? response.quote.features.map(String) : [];
-  if (!features.includes('no_gas')) throw new Error('Bitget Wallet NoGas is not available for this swap.');
-  const quoteDecimals = Math.max(response.quote.toAmount?.split('.')?.[1]?.length || 0, response.quote.minToAmount?.split('.')?.[1]?.length || 0);
-  const estimatedRaw = decimalRaw(response.quote.toAmount, quoteDecimals);
-  const minimumRaw = decimalRaw(response.quote.minToAmount, quoteDecimals);
-  if (estimatedRaw === null || estimatedRaw <= 0n || minimumRaw === null || minimumRaw <= 0n || minimumRaw > estimatedRaw ||
-      typeof response.quote.market !== 'string' || !response.quote.market) {
-    throw new Error('Bitget Wallet returned an invalid NoGas quote.');
-  }
-  for (const signature of response.order.signatures) {
-    const chainId = Number(signature?.chainId ?? signature?.data?.domain?.chainId);
-    const message = signature?.data?.message;
-    if (signature?.kind !== 'signature' || typeof signature.hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(signature.hash) ||
-        signature.data?.signType !== 'eip712' || chainId !== 2818 ||
-        typeof message?.msgSender !== 'string' || message.msgSender.toLowerCase() !== address.toLowerCase()) {
-      throw new Error('Bitget Wallet returned an invalid NoGas EIP-712 signature request.');
-    }
-  }
-  const signatureDeadline = Number(response.order.signatures[0]?.data?.message?.deadline);
-  const expiresInSeconds = Number.isSafeInteger(signatureDeadline)
-    ? Math.max(0, signatureDeadline - Math.floor(Date.now() / 1000))
-    : 300;
-  if (expiresInSeconds <= 0) throw new Error('Bitget Wallet NoGas order has expired. Request a new order.');
-  return {
-    provider: 'Bitget Wallet NoGas Order Mode',
-    mode: 'no_gas',
-    network: 'Morph Mainnet',
-    chainId: 2818,
-    tokenIn,
-    tokenOut,
-    amount,
-    estimatedOutput: response.quote.toAmount,
-    minimumOutput: response.quote.minToAmount,
-    slippage: String(response.quote.slippage ?? slippage),
-    market: response.quote.market,
-    expiresInSeconds,
-    features,
-    orderId: response.order.orderId,
-    signatures: response.order.signatures
-  };
-}
-
-export async function submitMorphNoGasOrder({ orderId, signedTxs }, {
-  proxyUrl = process.env.BGW_SWAP_PROXY_URL || DEFAULT_SWAP_PROXY,
-  fetchImpl = globalThis.fetch
-} = {}) {
-  if (typeof orderId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(orderId)) throw new Error('Bitget Wallet NoGas order ID is invalid.');
-  if (!Array.isArray(signedTxs) || !signedTxs.length || signedTxs.length > 16 || signedTxs.some(value => typeof value !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(value))) {
-    throw new Error('Bitget Wallet NoGas signatures are invalid.');
-  }
-  let parsedProxy;
-  try { parsedProxy = new URL(proxyUrl); } catch { throw new Error('BGW_SWAP_PROXY_URL must be a valid HTTPS URL.'); }
-  if (parsedProxy.protocol !== 'https:') throw new Error('BGW_SWAP_PROXY_URL must use HTTPS.');
-  const response = await requestProxy({ mode: 'no_gas_submit', orderId, signedTxs }, parsedProxy.toString(), fetchImpl);
-  if (response.mode !== 'no_gas_submit' || !response.result) throw new Error('Bitget Wallet NoGas submission returned an invalid response.');
-  return response.result;
 }

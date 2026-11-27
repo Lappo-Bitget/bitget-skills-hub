@@ -251,19 +251,6 @@ If the shared proxy reports credentials are not configured or the API rejects
 the account, report that response and stop. Never ask users to paste API
 credentials into chat or local skill files.
 
-For Bitget Wallet GetGas, use the official `NoGas` Order Mode flow through the
-`get_gas` MCP tool. This is gas-sponsored swap execution, not a standalone
-native-token faucet. The tool supports the stablecoin catalog, checks that the
-official `getSwapPrice` response includes `features: ["no_gas"]`, and creates a
-`makeSwapOrder` request with `feature: "no_gas"`. EVM responses contain EIP-712
-signature requests instead of ordinary transaction calldata. Show the pair,
-minimum received, market, expiry, order ID, and signing hashes before calling
-`swap_execute`. That tool signs each returned hash with `eth_sign` in Bitget
-Wallet and submits the signatures through the official `submitSwapOrder`
-endpoint. No native gas balance or ERC-20 approval is required on this path. If
-`no_gas` is absent, report that the official capability is unavailable for the
-selected pair.
-
 Before the user signs, show the pair, amount, minimum received, slippage, market,
 transaction target, value, and expiry. The quote tool checks ERC-20 allowance
 and returns a one-use quote ID. In lightweight mode, if approval is needed,

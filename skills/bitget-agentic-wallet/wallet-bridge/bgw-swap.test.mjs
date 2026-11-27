@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getMorphSwapQuote, getMorphNoGasOrder, submitMorphNoGasOrder } from './bgw-swap.mjs';
+import { getMorphSwapQuote } from './bgw-swap.mjs';
 
 const wallet = '0x2222222222222222222222222222222222222222';
 const router = '0x1111111111111111111111111111111111111111';
@@ -20,22 +20,6 @@ function validProxyResponse({ value = '0', minToAmount = '2468750' } = {}) {
       slippage: '1.25', deadline: 300, estimateRevert: false
     },
     transaction: { to: router, data: '0x12345678', value }
-  };
-}
-
-function validNoGasResponse() {
-  return {
-    provider: 'Bitget Wallet',
-    mode: 'no_gas',
-    quote: { toAmount: '9.8', minToAmount: '9.7', market: 'bgwevmaggregator', slippage: '1', features: ['no_gas'] },
-    order: {
-      orderId: '316de20899804b75a4e88f9bfd8468f3',
-      signatures: [{
-        kind: 'signature', chainName: 'morph', chainId: '2818',
-        hash: `0x${'11'.repeat(32)}`,
-        data: { signType: 'eip712', types: {}, domain: { chainId: '2818' }, message: { chainId: '2818', msgSender: wallet, deadline: String(Math.floor(Date.now() / 1000) + 300) } }
-      }]
-    }
   };
 }
 
@@ -70,27 +54,6 @@ test('uses the native-token contract and exact ETH value', async () => {
   assert.equal(calls[0].body.tokenInAddress, '');
   assert.equal(calls[0].body.amount, '1000000000000000000');
   assert.equal(result.transaction.value, '1000000000000000000');
-});
-
-test('prepares an official Bitget Wallet NoGas order', async () => {
-  const calls = [];
-  const result = await getMorphNoGasOrder({
-    tokenIn: 'USDC', tokenOut: 'USDT0', amount: '10', slippage: '1', address: wallet
-  }, { fetchImpl: proxyFetch(validNoGasResponse(), calls) });
-  assert.equal(calls[0].body.mode, 'no_gas');
-  assert.equal(calls[0].body.slippage, '0.01');
-  assert.equal(result.mode, 'no_gas');
-  assert.equal(result.features.includes('no_gas'), true);
-  assert.equal(result.orderId, '316de20899804b75a4e88f9bfd8468f3');
-});
-
-test('submits NoGas signatures through the shared proxy', async () => {
-  const calls = [];
-  const signed = `0x${'22'.repeat(65)}`;
-  const response = { provider: 'Bitget Wallet', mode: 'no_gas_submit', result: { orderId: '316de20899804b75a4e88f9bfd8468f3', status: 'submitted' } };
-  const result = await submitMorphNoGasOrder({ orderId: '316de20899804b75a4e88f9bfd8468f3', signedTxs: [signed] }, { fetchImpl: proxyFetch(response, calls) });
-  assert.equal(calls[0].body.mode, 'no_gas_submit');
-  assert.deepEqual(result, response.result);
 });
 
 test('rejects invalid token, calldata, proxy response, and non-HTTPS proxy', async () => {

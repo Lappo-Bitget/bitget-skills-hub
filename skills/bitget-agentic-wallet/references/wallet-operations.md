@@ -104,8 +104,8 @@ secrets only. The browser must never receive the API Secret. If credentials or
 Morph access are missing, explain that and do not fall back to an unverified
 router.
 
-The local WalletConnect MCP bridge exposes `swap_quote`, `swap_approve`,
-`swap_execute`, and `get_gas`. `swap_quote` calls the shared HTTPS proxy at
+The local WalletConnect MCP bridge exposes `swap_quote`, `swap_approve`, and
+`swap_execute`. `swap_quote` calls the shared HTTPS proxy at
 `https://morph-agent-id.pages.dev/api/swap-quote`. The proxy signs requests to
 `https://bopenapi.bgwapi.io` using API credentials stored in Cloudflare Pages
 Secrets. Other users do not need their own API credentials. The API uses `morph`
@@ -117,15 +117,6 @@ string. The selector is limited to ETH, BGB, USDC, USDT0, USDe, USD1, and WETH.
 If the shared proxy reports credentials are not configured or the API rejects
 the account, report that response and stop. Never ask users to paste API
 credentials into chat or local skill files.
-
-`get_gas` is the official Bitget Wallet NoGas Order Mode. It is a sponsored
-swap path rather than a native-token faucet. Use it for stablecoin pairs only.
-The bridge checks `getSwapPrice.features` for `no_gas`, creates
-`makeSwapOrder(feature: "no_gas")`, displays the returned EIP-712 hashes, and
-then uses `swap_execute` to sign each hash with `eth_sign` and call
-`submitSwapOrder`. No native gas balance or ERC-20 approval is required when
-the official quote supports this feature. If the feature is absent, report that
-NoGas is unavailable for the pair.
 
 Before the user signs, show the pair, amount, minimum received, slippage, market,
 transaction target, value, and expiry. The quote tool checks ERC-20 allowance
