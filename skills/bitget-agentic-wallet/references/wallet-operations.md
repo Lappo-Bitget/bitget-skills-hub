@@ -35,6 +35,13 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
   or verified for that network. Pin a multi-asset read to one block. Show
   individual read failures as unavailable, never as zero. Keep balances
   separate from gas estimates and permission-account funds.
+- **GetGas:** treat GetGas as Bitget Wallet’s prepaid, app-managed gas account.
+  The user funds it in Wallet > GetGas, and Bitget Wallet may use the balance to
+  pay supported transaction fees across multiple chains. Submit an ordinary
+  reviewed wallet transaction through `wallet_send_transaction`. Do not model
+  GetGas as a token balance in `wallet_read`, a NoGas swap order, or a custom
+  `feeTokenID` and `feeLimit` pair. The public skill interface does not expose
+  GetGas top-up or balance APIs.
 - **Transfers:** confirm recipient, token contract, amount, chain, and fee. Resolve
   names (for example, an EVM naming protocol if deployed and supported on Morph)
   before sending and ask the user to confirm the resolved address. Never assume

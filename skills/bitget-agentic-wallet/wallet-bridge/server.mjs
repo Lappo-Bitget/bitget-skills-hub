@@ -282,7 +282,7 @@ server.registerTool('wallet_read', {
 
 server.registerTool('wallet_send_transaction', {
   title: 'Request a wallet transaction',
-  description: 'Ask Bitget Wallet to display and request user approval for a transaction on the connected EVM network. The assistant must explain the exact network, connected address, destination, function/data, value, token amount, and fees, and obtain the user’s clear confirmation before calling this tool. Never use for opaque/unreviewed calldata.',
+  description: 'Ask Bitget Wallet to display and request user approval for a transaction on the connected EVM network. If the user has funded Bitget Wallet GetGas, the wallet app may automatically pay the network fee from that prepaid multi-chain balance. The assistant must explain the exact network, connected address, destination, function/data, value, token amount, and fees, and obtain the user’s clear confirmation before calling this tool. Never use for opaque/unreviewed calldata.',
   inputSchema: {
     to: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
     data: z.string().regex(/^0x(?:[0-9a-fA-F]{2})*$/).default('0x'),

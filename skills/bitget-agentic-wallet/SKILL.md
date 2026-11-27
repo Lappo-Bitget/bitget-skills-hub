@@ -167,6 +167,14 @@ action per view and verify desktop and narrow-screen layouts before delivery.
 - Use `wallet_send_transaction` for lightweight-mode calls and transfers. In
   developer mode, route writes through the local signer capability exposed by
   the MCP. If that capability is unavailable, stop and report the setup gap.
+ - **GetGas:** GetGas is a Bitget Wallet app-level prepaid gas account. The user
+   tops it up once from Wallet > GetGas with a supported asset, then Bitget
+   Wallet can use that balance to pay fees for supported transactions across
+   multiple chains. For a transaction, use the normal `wallet_send_transaction`
+   flow and let Bitget Wallet select GetGas. Do not replace this with a NoGas
+   Swap order, do not fabricate a GetGas API, and do not pass `feeTokenID` or
+   `feeLimit` as a substitute. Top-up and GetGas balance management stay inside
+   the Bitget Wallet app because this skill has no public GetGas account API.
 - Use `wallet_deploy_contract` only for lightweight-mode Bitget Wallet
   deployment. Developer-mode deployment requires a local signer deployment
   tool and must not fall back to a Bitget Wallet approval popup.
