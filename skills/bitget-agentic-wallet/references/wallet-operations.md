@@ -1,4 +1,4 @@
-# Wallet operations on Morph
+# Wallet operations across supported EVM networks
 
 Use this reference whenever the user asks for a wallet capability beyond Agent ID.
 
@@ -7,9 +7,12 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
 1. Identify the requested operation: connection/status, chain, balance, history,
    fee, transfer, approval, swap/quote, conditional order, contract call/signature,
    pending transaction, DeFi, prediction market, or x402.
-2. Check whether a Morph-compatible tool or named protocol is available in this
-   session. Read its current guide or documentation for exact parameters. Never
-   invent a CLI command, operation ID, contract address, route, or supported venue.
+2. For connection, status, read-only RPC calls, and ordinary EVM transactions,
+   use the currently active supported network. For Agent ID, swaps, and
+   Morph-specific deployment workflows, check whether a Morph-compatible tool
+   or named protocol is available in this session. Read its current guide or
+   documentation. Never invent a CLI command, operation ID, contract address,
+   route, or supported venue.
 3. For a read, query the provider/RPC and state the block or freshness when it matters.
 4. For a write, prepare a wallet transaction and show its complete review details.
    The user confirms in Bitget Wallet; the wallet supplies gas and signs/broadcasts.
@@ -18,17 +21,20 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
 
 ## Capability notes
 
-- **Connect/status:** connect through Bitget Wallet or WalletConnect and show the
-  selected EVM address on Morph Mainnet.
+- **Connect/status:** connect through Bitget Wallet or WalletConnect with one of
+  `morph`, `bsc`, `arbitrum`, `ethereum`, `polygon`, or `base`, then show the
+  selected EVM address and active network. Use `wallet_switch_network` for a
+  network change in an existing session.
 - **Wallet settings and limits:** inspect only settings/limits exposed by the
   connected wallet. Do not claim Binance-specific quotas, lock controls, or
   security checks exist in Bitget Wallet unless its current interface/tool confirms
   them.
-- **Balances/history/fees:** for a balance query, read only ETH, BGB, USDC,
-  USDT0, USDe, USD1, and WETH from the Morph balance catalog in the skill. Pin
-  reads to one Morph block. Show individual read failures as unavailable, never
-  as zero. Keep balances separate from gas estimates and permission-account
-  funds. Do not promise that BGB gas is supported by every wallet version.
+- **Balances/history/fees:** on Morph, read only ETH, BGB, USDC, USDT0, USDe,
+  USD1, and WETH from the Morph balance catalog in the skill. On another
+  supported EVM network, use the selected network and token addresses supplied
+  or verified for that network. Pin a multi-asset read to one block. Show
+  individual read failures as unavailable, never as zero. Keep balances
+  separate from gas estimates and permission-account funds.
 - **Transfers:** confirm recipient, token contract, amount, chain, and fee. Resolve
   names (for example, an EVM naming protocol if deployed and supported on Morph)
   before sending and ask the user to confirm the resolved address. Never assume
@@ -60,6 +66,10 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
   executable here rather than routing to Binance or Bitget exchange APIs.
 
 ## Morph balance catalog
+
+The catalog below is Morph-specific. For another supported EVM network, query
+the native balance or an explicitly supplied ERC-20 contract on the active
+network.
 
 When the user selects or asks for a wallet balance query, include only the
 following assets. The list is for read-only balance display and does not add any

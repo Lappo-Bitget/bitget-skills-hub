@@ -1,8 +1,10 @@
 # Bitget Skills Hub
 
-Codex Skill for connecting Bitget Wallet to Morph Mainnet through WalletConnect.
-It supports Agent ID reads, read-only Morph RPC queries, user-approved wallet
-transactions, bounded developer-mode swaps, and an explicitly selected local
+Codex Skill for connecting Bitget Wallet to Morph Mainnet, BNB Smart Chain,
+Arbitrum One, Ethereum Mainnet, Polygon PoS, and Base through WalletConnect.
+It supports multi-network EVM connection/status/read operations and
+user-approved wallet transactions. Morph-specific capabilities include bounded
+developer-mode swaps and an explicitly selected local
 Hardhat build/deploy workflow. WalletConnect keeps keys and signatures inside
 Bitget Wallet. The Hardhat path is separate and requires a host-configured
 secret provider. No user wallet key is entered into this repository, a local
@@ -20,8 +22,10 @@ Hardhat workflow. On the first contract deployment it initializes the current
 project automatically; you confirm the exact deployment plan once in the
 conversation. Restart the agent after installation.
 
-The WalletConnect MCP server source is included in this repository. The
-one-step installer copies the skill and server, installs the server's locked
+The WalletConnect MCP server source is included in this repository. One
+WalletConnect approval requests all six supported EVM networks, so switching
+between them does not require a second wallet connection. The one-step
+installer copies the skill and server, installs the server's locked
 dependencies, then registers `bitget-morph-wallet` in detected local clients.
 It handles Codex, Claude Code, Claude Desktop, Cursor, Windsurf, Gemini CLI,
 and Cline when their local configuration directories are present. Restart the

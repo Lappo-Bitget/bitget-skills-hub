@@ -1,12 +1,12 @@
 interface:
   display_name: "Bitget Agentic Wallet"
-  short_description: "Morph wallet, swaps, Agent ID, and Hardhat deployments"
-  default_prompt: "For a wallet connection or Bitget Wallet deployment request, immediately call mcp__bitget_morph_wallet__connect_wallet and render its returned PNG image as the first visible result. In Codex, immediately call mcp__codex_app__open_in_codex with the absolute QR PNG fallback path, target type file, and placement right so the saved QR opens in the right panel. If the chat client does not render the MCP image block, embed that local PNG with Markdown. Do not ask the user to open another site, copy a URI, or confirm before showing the image. Never claim a QR exists without an image, and never report Bitget Wallet deployment preparation as complete until the image is present. For Morph swaps, use the official Bitget Wallet Swap API tools swap_quote, swap_approve, and swap_execute. Require explicit confirmation and Bitget Wallet review for each approval and swap. Use $bitget-agentic-wallet for wallet requests, or explicitly enable developer mode for a reviewed Bitget Wallet or Hardhat deployment."
+  short_description: "Multi-network EVM wallet, Morph swaps, Agent ID, and Hardhat deployments"
+  default_prompt: "For a wallet connection request, immediately call mcp__bitget_morph_wallet__connect_wallet and request one WalletConnect approval covering all supported EVM networks. If the user names a starting network, pass network=morph, bsc, arbitrum, ethereum, polygon, or base. If no network is named, use network=morph. Render its returned PNG image as the first visible result. In Codex, immediately call mcp__codex_app__open_in_codex with the absolute QR PNG fallback path, target type file, and placement right so the saved QR opens in the right panel. If the chat client does not render the MCP image block, embed that local PNG with Markdown. Do not ask the user to open another site, copy a URI, or confirm before showing the image. Never claim a QR exists without an image, and never report Bitget Wallet deployment preparation as complete until the image is present. After connection, use wallet_switch_network without generating another QR. For Morph swaps, use the official Bitget Wallet Swap API tools swap_quote, swap_approve, and swap_execute. Require explicit confirmation and Bitget Wallet review for each approval and swap. Use $bitget-agentic-wallet for wallet requests, or explicitly enable developer mode for a reviewed Bitget Wallet or Hardhat deployment."
 policy:
   allow_implicit_invocation: true
 dependencies:
   tools:
     - type: "mcp"
       value: "bitget-morph-wallet"
-      description: "Local WalletConnect bridge for user-approved Bitget Wallet sessions on Morph"
+      description: "Local WalletConnect bridge for user-approved Bitget Wallet sessions on supported EVM networks"
       transport: "stdio"

@@ -12,6 +12,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 import { resolveWalletConnectProxy } from './proxy.mjs';
 import { getMorphSwapQuote, MORPH_ASSETS } from './bgw-swap.mjs';
 import { randomUUID } from 'node:crypto';
+import { getNetwork, networkForChainId, NETWORK_CHAIN_IDS, NETWORK_KEYS, NETWORK_RPC_MAP, supportedNetworkSummary } from './networks.mjs';
 
 // Keep WalletConnect usable for users with direct internet access. If the
 // environment supplies a proxy, route only WalletConnect's WebSocket relay
@@ -31,8 +32,7 @@ if (proxyUrl) {
 }
 const { EthereumProvider } = await import('@walletconnect/ethereum-provider');
 
-const CHAIN_ID = 2818;
-const RPC = 'https://rpc-bgw.morph.network';
+const DEFAULT_NETWORK_KEY = 'morph';
 
 const PROJECT_ID = process.env.WALLETCONNECT_PROJECT_ID || '8c4660c0aeaeebdec859180fb6679463';
 const DAPP_URL = 'https://morph-agent-id.pages.dev/';
@@ -40,6 +40,7 @@ const QR_FILE = fileURLToPath(new URL('./walletconnect-qr.png', import.meta.url)
 const BRIDGE_DIR = dirname(fileURLToPath(import.meta.url));
 const LOCAL_WALLET_CMD = resolve(BRIDGE_DIR, '..', 'scripts', 'configure-local-wallet.cmd');
 let provider = null;
+let selectedNetworkKey = DEFAULT_NETWORK_KEY;
 let pairingPromise = null;
 let pairingQr = null;
 let pairingUri = null;
@@ -96,28 +97,39 @@ async function connectedAccount() {
   const p = requireProvider();
   const accounts = await p.request({ method: 'eth_accounts' });
   if (!Array.isArray(accounts) || !accounts.length) throw new Error('WalletConnect session is not approved. Reconnect with Bitget Wallet.');
-  const chainId = BigInt(await p.request({ method: 'eth_chainId' }));
-  if (chainId !== BigInt(CHAIN_ID)) throw new Error('Wallet is not on Morph Mainnet. Switch networks in Bitget Wallet.');
-  return { p, address: accounts[0], chainId: Number(chainId) };
+  const chainId = Number(BigInt(await p.request({ method: 'eth_chainId' })));
+  const network = networkForChainId(chainId);
+  if (!network) throw new Error(`Unsupported EVM network (chain ID ${chainId}). Select BSC, Arbitrum One, Ethereum Mainnet, Polygon PoS, Base, or Morph Mainnet.`);
+  selectedNetworkKey = network.key;
+  return { p, address: accounts[0], chainId, network };
+}
+
+async function morphAccount() {
+  const status = await connectedAccount();
+  if (status.chainId !== 2818) {
+    throw new Error(`This operation is available on Morph Mainnet only. Switch the connected wallet from ${status.network.name} to Morph Mainnet first.`);
+  }
+  return status;
 }
 
 server.registerTool('connect_wallet', {
-  title: 'Connect Bitget Wallet by QR',
-  description: 'Create a WalletConnect pairing QR in this conversation. The user scans and approves it in Bitget Wallet. Returns the QR image; connection persists in this MCP process.',
-  inputSchema: { }
-}, async () => {
+  title: 'Connect Bitget Wallet on an EVM network',
+  description: 'Create one WalletConnect pairing QR whose single approval covers Morph Mainnet, BNB Smart Chain, Arbitrum One, Ethereum Mainnet, Polygon PoS, and Base. The network argument only selects the initial active chain.',
+  inputSchema: { network: z.enum(NETWORK_KEYS).default(DEFAULT_NETWORK_KEY) }
+}, async ({ network: networkKey }) => {
+  const targetNetwork = getNetwork(networkKey);
+  selectedNetworkKey = networkKey;
   if (!provider) {
     provider = await EthereumProvider.init({
       projectId: PROJECT_ID,
-      chains: [CHAIN_ID],
-      optionalChains: [CHAIN_ID],
+      chains: NETWORK_CHAIN_IDS,
       methods: ['eth_sendTransaction'],
-      optionalMethods: ['wallet_switchEthereumChain'],
+      optionalMethods: ['wallet_switchEthereumChain', 'wallet_addEthereumChain'],
       showQrModal: false,
-      rpcMap: { [CHAIN_ID]: RPC },
+      rpcMap: NETWORK_RPC_MAP,
       metadata: {
-        name: 'Bitget Agentic Wallet · Morph',
-        description: 'User-controlled Bitget Wallet connection for Morph Mainnet',
+        name: 'Bitget Agentic Wallet · EVM',
+        description: 'User-controlled Bitget Wallet connection for supported EVM networks',
         url: DAPP_URL,
         icons: []
       }
@@ -125,12 +137,20 @@ server.registerTool('connect_wallet', {
   }
   try {
     const status = await connectedAccount();
-    return textResult(`Already connected: ${status.address} on Morph Mainnet.`);
-  } catch { /* no active approved session; start pairing */ }
+    if (status.network.key === networkKey) {
+      return textResult(`Already connected: ${status.address} on ${status.network.name}.`);
+    }
+    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: `0x${targetNetwork.chainId.toString(16)}` }] });
+    const switched = await connectedAccount();
+    if (switched.network.key !== networkKey) throw new Error(`Wallet did not switch to ${targetNetwork.name}.`);
+    return textResult(`Already connected: ${switched.address} on ${targetNetwork.name}.`);
+  } catch (error) {
+    if (provider?.session && !/not approved|No WalletConnect session/i.test(error?.message || '')) throw error;
+  }
 
   if (pairingPromise) {
     const uriText = pairingUri ? `\n\nWalletConnect URI (备用，可复制到 Bitget Wallet)：\n${pairingUri}` : '';
-    return textResult(pairingText(`A WalletConnect pairing is already pending. Scan this QR with Bitget Wallet.${uriText}`), pairingQr);
+    return textResult(pairingText(`A WalletConnect pairing is already pending for ${targetNetwork.name}. Scan this QR with Bitget Wallet.${uriText}`), pairingQr);
   }
   let resolveUri; let rejectUri; let timer;
   const uriReady = new Promise((resolve, reject) => { resolveUri = resolve; rejectUri = reject; });
@@ -151,7 +171,7 @@ server.registerTool('connect_wallet', {
     } catch {
       pairingQrPath = null;
     }
-    return textResult(pairingText(`Scan this high-resolution QR with Bitget Wallet. Approve the WalletConnect request for Morph Mainnet. This connects the wallet to this assistant session; the user must separately approve every transaction in the wallet.\n\nWalletConnect URI (备用，可复制到 Bitget Wallet)：\n${uri}`), qr);
+    return textResult(pairingText(`Scan this high-resolution QR with Bitget Wallet. Approve one WalletConnect request covering all supported EVM networks: Morph Mainnet, BNB Smart Chain, Arbitrum One, Ethereum Mainnet, Polygon PoS, and Base. The initial active network is ${targetNetwork.name}. This connects the wallet to this assistant session; the user must separately approve every transaction in the wallet.\n\nWalletConnect URI (备用，可复制到 Bitget Wallet)：\n${uri}`), qr);
   } catch (error) {
     pairingPromise = null;
     pairingQr = null;
@@ -170,10 +190,10 @@ server.registerTool('connect_wallet', {
 
 server.registerTool('wallet_status', {
   title: 'Check connected wallet',
-  description: 'Return the connected Bitget Wallet address and verify that the wallet is on Morph Mainnet.',
+  description: 'Return the connected Bitget Wallet address and active supported EVM network.',
   inputSchema: {}
 }, async () => {
-  if (!provider) return textResult(JSON.stringify({ connected: false, status: 'not_connected', network: 'Morph Mainnet' }));
+  if (!provider) return textResult(JSON.stringify({ connected: false, status: 'not_connected', selectedNetwork: selectedNetworkKey, supportedNetworks: supportedNetworkSummary() }));
   // While the user is still scanning, EthereumProvider.connect() is pending
   // and request() would throw "Please call connect() before request()". Return
   // an explicit pending state so the agent does not misreport a failed or
@@ -183,10 +203,23 @@ server.registerTool('wallet_status', {
       pairingPromise.then(() => true, () => true),
       new Promise(resolve => setTimeout(() => resolve(false), 0))
     ]);
-    if (!settled) return textResult(JSON.stringify({ connected: false, status: 'waiting_scan', network: 'Morph Mainnet' }));
+    if (!settled) return textResult(JSON.stringify({ connected: false, status: 'waiting_scan', selectedNetwork: selectedNetworkKey, network: getNetwork(selectedNetworkKey).name, supportedNetworks: supportedNetworkSummary() }));
   }
-  const { address, chainId } = await connectedAccount();
-  return textResult(JSON.stringify({ connected: true, address, network: 'Morph Mainnet' }));
+  const { address, chainId, network } = await connectedAccount();
+  return textResult(JSON.stringify({ connected: true, address, chainId, network: network.name, networkKey: network.key, authorizationScope: 'all_supported_evm_networks', supportedNetworks: supportedNetworkSummary() }));
+});
+
+server.registerTool('wallet_switch_network', {
+  title: 'Switch the connected Bitget Wallet network',
+  description: 'Request a network switch in Bitget Wallet to one of the supported EVM networks.',
+  inputSchema: { network: z.enum(NETWORK_KEYS) }
+}, async ({ network: networkKey }) => {
+  const network = getNetwork(networkKey);
+  const p = requireProvider();
+  await p.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: `0x${network.chainId.toString(16)}` }] });
+  const status = await connectedAccount();
+  if (status.network.key !== networkKey) throw new Error(`Wallet did not switch to ${network.name}.`);
+  return textResult(JSON.stringify({ connected: true, address: status.address, chainId: status.chainId, network: status.network.name, networkKey: status.network.key, authorizationScope: 'all_supported_evm_networks' }));
 });
 
 server.registerTool('wallet_set_mode', {
@@ -235,8 +268,8 @@ server.registerTool('wallet_disconnect', {
 });
 
 server.registerTool('wallet_read', {
-  title: 'Read Morph chain data',
-  description: 'Make a read-only Morph JSON-RPC call using the connected wallet session. Allowed methods: eth_getBalance, eth_call, eth_blockNumber, eth_getTransactionByHash, eth_getTransactionReceipt, eth_getLogs.',
+  title: 'Read EVM chain data',
+  description: 'Make a read-only JSON-RPC call on the currently connected supported EVM network. Allowed methods: eth_getBalance, eth_call, eth_blockNumber, eth_getTransactionByHash, eth_getTransactionReceipt, eth_getLogs.',
   inputSchema: {
     method: z.enum(['eth_getBalance', 'eth_call', 'eth_blockNumber', 'eth_getTransactionByHash', 'eth_getTransactionReceipt', 'eth_getLogs']),
     params: z.array(z.unknown()).default([])
@@ -244,12 +277,12 @@ server.registerTool('wallet_read', {
 }, async ({ method, params }) => {
   const { p, address, chainId } = await connectedAccount();
   const result = await p.request({ method, params });
-  return textResult(JSON.stringify({ method, address, result }));
+  return textResult(JSON.stringify({ method, address, chainId, network: networkForChainId(chainId).name, result }));
 });
 
 server.registerTool('wallet_send_transaction', {
   title: 'Request a wallet transaction',
-  description: 'Ask Bitget Wallet to display and request user approval for a Morph transaction. The assistant must explain the exact network, connected address, destination, function/data, value, token amount, and fees, and obtain the user’s clear confirmation before calling this tool. Never use for opaque/unreviewed calldata.',
+  description: 'Ask Bitget Wallet to display and request user approval for a transaction on the connected EVM network. The assistant must explain the exact network, connected address, destination, function/data, value, token amount, and fees, and obtain the user’s clear confirmation before calling this tool. Never use for opaque/unreviewed calldata.',
   inputSchema: {
     to: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
     data: z.string().regex(/^0x(?:[0-9a-fA-F]{2})*$/).default('0x'),
@@ -261,7 +294,7 @@ server.registerTool('wallet_send_transaction', {
   const { p, address, chainId } = await connectedAccount();
   const tx = { from: address, to, data, value, ...(feeTokenID ? { feeTokenID } : {}), ...(feeLimit ? { feeLimit } : {}) };
   const hash = await p.request({ method: 'eth_sendTransaction', params: [tx] });
-  return textResult(JSON.stringify({ submitted: true, hash, ...tx }));
+  return textResult(JSON.stringify({ submitted: true, hash, network: networkForChainId(chainId).name, chainId, ...tx }));
 });
 
 async function getSwapQuote(quoteId, address) {
@@ -306,7 +339,7 @@ server.registerTool('swap_quote', {
     slippage: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/).default('1')
   }
   }, async ({ tokenIn, tokenOut, amount, slippage }) => {
-  const { address } = await connectedAccount();
+  const { address } = await morphAccount();
   const result = await getMorphSwapQuote({ tokenIn, tokenOut, amount, slippage, address });
   const quoteId = randomUUID();
   for (const [id, pending] of pendingSwapQuotes) {
@@ -318,7 +351,7 @@ server.registerTool('swap_quote', {
   const asset = MORPH_ASSETS[tokenIn];
   let allowance = null;
   if (asset.contract) {
-    const { p } = await connectedAccount();
+    const { p } = await morphAccount();
     allowance = (await readTokenAllowance(p, asset.contract, address, result.transaction.to)).toString();
   }
   const amountInRaw = amount.split('.');
@@ -344,7 +377,7 @@ server.registerTool('swap_authorize_session', {
   }
 }, async ({ quoteId, maxAmount, durationMinutes }) => {
   if (walletMode !== 'developer') throw new Error('A bounded swap authorization requires acknowledged developer mode.');
-  const { p, address } = await connectedAccount();
+  const { p, address } = await morphAccount();
   const quote = await getSwapQuote(quoteId, address);
   const asset = MORPH_ASSETS[quote.tokenIn];
   if (!asset.contract) throw new Error('Native ETH does not require token approval.');
@@ -385,7 +418,7 @@ server.registerTool('swap_authorization_status', {
   description: 'Check the pending approval receipt and, after confirmation, activate its off-chain time window. The on-chain ERC-20 allowance remains until spent or revoked.',
   inputSchema: { token: z.enum(['BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']) }
 }, async ({ token }) => {
-  const { p, address } = await connectedAccount();
+  const { p, address } = await morphAccount();
   const matches = [...swapAuthorizations.entries()].filter(([, grant]) =>
     grant.address.toLowerCase() === address.toLowerCase() && grant.token === token
   );
@@ -420,7 +453,7 @@ server.registerTool('swap_authorization_revoke', {
   description: 'Prepare a zero ERC-20 allowance for the spender in a bounded swap session. Show the current allowance and get clear user confirmation before calling. Bitget Wallet still asks the user to sign.',
   inputSchema: { token: z.enum(['BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']) }
 }, async ({ token }) => {
-  const { p, address } = await connectedAccount();
+  const { p, address } = await morphAccount();
   const matching = [...swapAuthorizations.entries()].filter(([, grant]) =>
     grant.address.toLowerCase() === address.toLowerCase() && grant.token === token
   );
@@ -445,7 +478,7 @@ server.registerTool('swap_approve', {
   description: 'Prepare an exact ERC-20 allowance for a previously displayed Bitget Wallet quote. Call only after showing token, exact amount, spender, Morph network, and fees and receiving the user’s clear confirmation. Bitget Wallet still asks the user to sign. A fresh quote is required after approval.',
   inputSchema: { quoteId: z.string().uuid() }
 }, async ({ quoteId }) => {
-  const { p, address } = await connectedAccount();
+  const { p, address } = await morphAccount();
   const quote = await getSwapQuote(quoteId, address);
   const asset = MORPH_ASSETS[quote.tokenIn];
   if (!asset.contract) throw new Error('Native ETH does not require token approval.');
@@ -467,7 +500,7 @@ server.registerTool('swap_execute', {
   description: 'Submit the saved Bitget Wallet Morph swap transaction. In lightweight mode, require clear user confirmation for this swap. In developer mode, a currently active bounded swap authorization permits submission without another conversational authorization prompt when the token, spender, duration, and remaining allowance match. Every transaction still requires Bitget Wallet signing.',
   inputSchema: { quoteId: z.string().uuid() }
 }, async ({ quoteId }) => {
-  const { p, address } = await connectedAccount();
+  const { p, address } = await morphAccount();
   const quote = await getSwapQuote(quoteId, address);
   const asset = MORPH_ASSETS[quote.tokenIn];
   if (asset.contract) {
@@ -521,11 +554,11 @@ server.registerTool('wallet_deploy_contract', {
   }
 }, async ({ bytecode, constructorData, value, feeTokenID, feeLimit }) => {
   if (walletMode !== 'developer') throw new Error('Contract deployment requires developer mode. Call wallet_set_mode with explicit acknowledgement first.');
-  const { p, address, chainId } = await connectedAccount();
+  const { p, address, chainId } = await morphAccount();
   const data = `${bytecode}${constructorData.slice(2)}`;
   const tx = { from: address, data, value, ...(feeTokenID ? { feeTokenID } : {}), ...(feeLimit ? { feeLimit } : {}) };
   const hash = await p.request({ method: 'eth_sendTransaction', params: [tx] });
-  return textResult(JSON.stringify({ submitted: true, hash, ...tx, mode: walletMode }));
+  return textResult(JSON.stringify({ submitted: true, hash, network: networkForChainId(chainId).name, chainId, ...tx, mode: walletMode }));
 });
 
 const transport = new StdioServerTransport();

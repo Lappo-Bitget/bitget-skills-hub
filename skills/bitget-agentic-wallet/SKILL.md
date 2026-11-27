@@ -1,15 +1,17 @@
 ---
 name: bitget-agentic-wallet
 description: >-
-  Use for Bitget Wallet operations on Morph Mainnet, including Agent ID reads,
-  lightweight wallet queries, user-approved transactions, bounded developer-mode
+  Use for Bitget Wallet operations across supported EVM networks, including
+  connection, status, read-only queries, and user-approved transactions on
+  BNB Smart Chain, Arbitrum One, Ethereum Mainnet, Polygon PoS, Base, and
+  Morph Mainnet. Morph-specific capabilities include Agent ID reads, bounded
   swaps, and Hardhat contract builds and deployments.
 ---
 
-# Bitget Wallet on Morph
+# Bitget Wallet EVM connections and Morph operations
 
-This skill uses the `bitget-morph-wallet` MCP tools for Bitget Wallet reads and
-user-approved transactions. Developer mode automatically routes signing to a
+This skill uses the `bitget-morph-wallet` MCP tools for Bitget Wallet
+connections, EVM reads, and user-approved transactions. Developer mode automatically routes signing to a
 separate local automation wallet governed by an explicit bounded policy. A
 WalletConnect session does not grant signing authority.
 
@@ -121,10 +123,14 @@ action per view and verify desktop and narrow-screen layouts before delivery.
   A deployment response must never contain “scan the QR above” unless that
   image is present in the response. If the MCP tool is unavailable or returns
   no image, report the concrete setup error and stop the Bitget Wallet flow.
-- **For a wallet-connection request, start the connection immediately.** Use
+- **For a wallet-connection request, start the connection immediately.** Call
   the runtime's actual `connect_wallet` MCP tool from `bitget-morph-wallet`
-  (in Codex this is `mcp__bitget_morph_wallet__connect_wallet`);
-  do not substitute shell commands, file reads, or a verbal claim that a QR is
+  (in Codex this is `mcp__bitget_morph_wallet__connect_wallet`). A single
+  WalletConnect approval must request all six supported EVM networks. If the
+  user names a starting network, pass it as `network=morph`, `network=bsc`,
+  `network=arbitrum`, `network=ethereum`, `network=polygon`, or `network=base`.
+  If no network is named, use `network=morph`. Do not substitute shell
+  commands, file reads, or a verbal claim that a QR is
   ready. This is a lightweight wallet action and does not require developer
   mode. The call returns a high-resolution PNG image and a WalletConnect URI.
   Render the returned PNG in the same response so the user can scan it directly
@@ -142,16 +148,22 @@ action per view and verify desktop and narrow-screen layouts before delivery.
   response, wait for a later user message that clearly confirms the wallet is
   connected, such as “确认连接好了”. A message that merely requests
   connection or says the QR was displayed is not confirmation. Only then call
-  `wallet_status` and verify the approved address on Morph Mainnet. Do not poll,
+  `wallet_status` and verify the approved address and active EVM network. Do not poll,
   check status proactively, or generate replacement QRs
   while the pairing is pending. If the user says the QR expired or cannot be
-  scanned, call `connect_wallet` once to create a fresh QR and render it in that
-  response, then wait for confirmation again.
+  scanned, call `connect_wallet` once with the same `network` to create a fresh
+  QR and render it in that response, then wait for confirmation again.
+- **For a network change after connection,** call `wallet_switch_network` with
+  one of the six supported network keys. This uses the same approved session
+  and must not create a second QR. Only create a new QR after the session was
+  disconnected or the user explicitly asks to reconnect.
 - Use `wallet_read` for the supported read-only JSON-RPC methods.
-- For a wallet-balance request, use the connected Morph address and read only
+- For a Morph wallet-balance request, use the connected address and read only
   ETH, BGB, USDC, USDT0, USDe, USD1, and WETH. Take one block number with
   `eth_blockNumber` and use that block tag for `eth_getBalance` and every
-  ERC-20 `balanceOf` call. Report failed reads as unavailable, never as zero.
+  ERC-20 `balanceOf` call. For another EVM network, use its active chain and
+  the token addresses selected by the user or verified for that chain. Report
+  failed reads as unavailable, never as zero.
 - Use `wallet_send_transaction` for lightweight-mode calls and transfers. In
   developer mode, route writes through the local signer capability exposed by
   the MCP. If that capability is unavailable, stop and report the setup gap.
@@ -173,6 +185,22 @@ proxy URL before starting the bridge (for example, `http://127.0.0.1:7890`).
 The bridge also honors standard `HTTPS_PROXY`, `HTTP_PROXY`, and `ALL_PROXY`
 variables. It never assumes a machine-specific localhost proxy, and it rejects
 non-HTTP(S) proxy URLs.
+
+## Supported EVM networks
+
+The connection bridge supports the following networks. Connection, status,
+read-only RPC calls, and ordinary user-approved EVM transactions operate on
+the active network. Agent ID, the Bitget Wallet Morph Swap API, Morph token
+catalogs, and Morph Hardhat deployment remain Morph-specific.
+
+| Key | Network | Chain ID | Native gas asset |
+| --- | --- | ---: | --- |
+| `morph` | Morph Mainnet | 2818 | ETH |
+| `bsc` | BNB Smart Chain | 56 | BNB |
+| `arbitrum` | Arbitrum One | 42161 | ETH |
+| `ethereum` | Ethereum Mainnet | 1 | ETH |
+| `polygon` | Polygon PoS | 137 | POL |
+| `base` | Base | 8453 | ETH |
 
 ## Network and project constants
 
