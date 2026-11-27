@@ -29,16 +29,10 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
   connected wallet. Do not claim Binance-specific quotas, lock controls, or
   security checks exist in Bitget Wallet unless its current interface/tool confirms
   them.
-- **Balances/history/fees:** on Morph, read only ETH, BGB, USDC, USDT0, USDe,
-  USD1, and WETH from the Morph balance catalog in the skill. On another
-  supported EVM network, use the selected network and token addresses supplied
-  or verified for that network. Pin a multi-asset read to one block. Show
+- **Balances/history/fees:** on the active network, read its native balance and token addresses supplied or verified for that network. Pin a multi-asset read to one block. Show
   individual read failures as unavailable, never as zero. Keep balances
   separate from gas estimates and permission-account funds.
-- **Transfers:** confirm recipient, token contract, amount, chain, and fee. Resolve
-  names (for example, an EVM naming protocol if deployed and supported on Morph)
-  before sending and ask the user to confirm the resolved address. Never assume
-  Binance `.ai` Agent ID or another chain's naming service resolves on Morph.
+- **Transfers:** confirm recipient, token contract, amount, chain, and fee. Resolve names only when the naming protocol is deployed and verified on the active network. Ask the user to confirm the resolved address.
 - **Approvals:** show token, spender, current allowance, requested allowance, and
   whether an exact or unlimited approval is being prepared. Never enlarge an
   allowance silently.
@@ -49,7 +43,7 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
   enforces the allowance. ERC-20 allowance has no native expiry, so explain
   that unused allowance remains until spent or revoked. Every swap transaction
   still needs Bitget Wallet signing on this path.
-- **Swaps and quotes:** use a Morph-supported DEX or aggregator only after checking
+- **Swaps and quotes:** use a supported EVM DEX or aggregator only after checking
   live availability, route, slippage, minimum received, and fee. A quote is not an
   order. Support market swaps and limit/trigger orders only when an available Morph
   venue explicitly offers them; otherwise explain that execution venue is missing.
@@ -65,11 +59,9 @@ Use this reference whenever the user asks for a wallet capability beyond Agent I
   protocol/tool. If none is available, say that the category is not currently
   executable here rather than routing to Binance or Bitget exchange APIs.
 
-## Morph balance catalog
+## Active-network balance reads
 
-The catalog below is Morph-specific. For another supported EVM network, query
-the native balance or an explicitly supplied ERC-20 contract on the active
-network.
+Use the active network's native balance and explicitly supplied or verified ERC-20 contracts. The Morph catalog below applies only when Morph is selected.
 
 When the user selects or asks for a wallet balance query, include only the
 following assets. The list is for read-only balance display and does not add any
@@ -95,31 +87,25 @@ secrets in chat or terminal. State failures exactly when possible, distinguish a
 estimate failure from a mined revert, and never report success without receipt and
 state verification.
 
-## Swap on Morph
+## Swap on supported EVM networks
 
 Use Bitget Wallet's official Swap API for Morph Mainnet swaps. The API lists
 Morph Chain ID 2818 as supporting Instruction Mode. It requires an API Key and
 API Secret approved for the account. Keep both in server-side Cloudflare Pages
-secrets only. The browser must never receive the API Secret. If credentials or
-Morph access are missing, explain that and do not fall back to an unverified
-router.
+secrets only. The browser must never receive the API Secret. If credentials or access for the selected network are missing, explain that and do not fall back to an unverified router.
 
 The local WalletConnect MCP bridge exposes `swap_quote`, `swap_approve`,
-`swap_execute`, and `get_gas`. `swap_quote` calls the shared HTTPS proxy at
+`swap_execute`, and `no_gas_mode`. `swap_quote` calls the shared HTTPS proxy at
 `https://morph-agent-id.pages.dev/api/swap-quote`. The proxy signs requests to
 `https://bopenapi.bgwapi.io` using API credentials stored in Cloudflare Pages
-Secrets. Other users do not need their own API credentials. The API uses `morph`
-as the chain name, the connected address as both sender and recipient,
-smallest-unit integer amounts, the returned market, minimum output, and a
-300-second deadline. The API represents the native token contract as an empty
-string. The selector is limited to ETH, BGB, USDC, USDT0, USDe, USD1, and WETH.
+Secrets. Other users do not need their own API credentials. The API uses the active network key and chain ID, the connected address as both sender and recipient, smallest-unit integer amounts, the returned market, minimum output, and a 300-second deadline. Native assets use an empty token contract, while ERC-20 assets require their verified contract address and decimals on the selected network.
 
 If the shared proxy reports credentials are not configured or the API rejects
 the account, report that response and stop. Never ask users to paste API
 credentials into chat or local skill files.
 
-`get_gas` is the official Bitget Wallet NoGas Order Mode. It is a sponsored
-swap path rather than a native-token faucet. Use it for stablecoin pairs only.
+`no_gas_mode` is the official Bitget Wallet NoGas Order Mode. It is a sponsored
+swap path rather than a native-token faucet. Use it for pairs supported by the selected network and official quote.
 The bridge checks `getSwapPrice.features` for `no_gas`, creates
 `makeSwapOrder(feature: "no_gas")`, displays the returned EIP-712 hashes, and
 then uses `swap_execute` to sign each hash with `eth_sign` and call
