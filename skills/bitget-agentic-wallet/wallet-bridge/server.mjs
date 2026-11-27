@@ -10,7 +10,7 @@ import { z } from 'zod';
 import Ws from 'ws';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { resolveWalletConnectProxy } from './proxy.mjs';
-import { getMorphSwapQuote, MORPH_ASSETS } from './bgw-swap.mjs';
+import { getMorphSwapQuote, getMorphNoGasOrder, submitMorphNoGasOrder, MORPH_ASSETS } from './bgw-swap.mjs';
 import { randomUUID } from 'node:crypto';
 import { getNetwork, networkForChainId, NETWORK_CHAIN_IDS, NETWORK_KEYS, NETWORK_RPC_MAP, supportedNetworkSummary } from './networks.mjs';
 
@@ -123,7 +123,7 @@ server.registerTool('connect_wallet', {
     provider = await EthereumProvider.init({
       projectId: PROJECT_ID,
       chains: NETWORK_CHAIN_IDS,
-      methods: ['eth_sendTransaction'],
+      methods: ['eth_sendTransaction', 'eth_sign'],
       optionalMethods: ['wallet_switchEthereumChain', 'wallet_addEthereumChain'],
       showQrModal: false,
       rpcMap: NETWORK_RPC_MAP,
@@ -329,6 +329,17 @@ function amountToRaw(asset, amount) {
   return raw;
 }
 
+function storePendingSwapQuote(result, address) {
+  for (const [id, pending] of pendingSwapQuotes) {
+    if (pending.expiresAt <= Date.now()) pendingSwapQuotes.delete(id);
+  }
+  while (pendingSwapQuotes.size >= 20) pendingSwapQuotes.delete(pendingSwapQuotes.keys().next().value);
+  const quoteId = randomUUID();
+  const expiresAt = Date.now() + Math.min(Number(result.expiresInSeconds ?? 300), 300) * 1000;
+  pendingSwapQuotes.set(quoteId, { ...result, address, expiresAt });
+  return { quoteId, expiresAt };
+}
+
 server.registerTool('swap_quote', {
   title: 'Get a Bitget Wallet Morph swap quote',
   description: 'Request a Morph quote and transaction calldata from Bitget Wallet official Swap API using the local server credentials. This does not submit a transaction. Show the returned pair, amounts, minimum output, slippage, market, target, and value. In lightweight mode, get clear confirmation before approval and swap submissions. In developer mode, an active bounded session authorizes in-scope swaps without repeated conversational confirmation, while Bitget Wallet still requires a signature for every transaction.',
@@ -341,13 +352,7 @@ server.registerTool('swap_quote', {
   }, async ({ tokenIn, tokenOut, amount, slippage }) => {
   const { address } = await morphAccount();
   const result = await getMorphSwapQuote({ tokenIn, tokenOut, amount, slippage, address });
-  const quoteId = randomUUID();
-  for (const [id, pending] of pendingSwapQuotes) {
-    if (pending.expiresAt <= Date.now()) pendingSwapQuotes.delete(id);
-  }
-  while (pendingSwapQuotes.size >= 20) pendingSwapQuotes.delete(pendingSwapQuotes.keys().next().value);
-  const expiresAt = Date.now() + Math.min(result.expiresInSeconds, 300) * 1000;
-  pendingSwapQuotes.set(quoteId, { ...result, address, expiresAt });
+  const { quoteId, expiresAt } = storePendingSwapQuote(result, address);
   const asset = MORPH_ASSETS[tokenIn];
   let allowance = null;
   if (asset.contract) {
@@ -367,6 +372,30 @@ server.registerTool('swap_quote', {
   }));
 });
 
+server.registerTool('get_gas', {
+  title: 'Check Bitget Wallet NoGas availability',
+  description: 'Prepare a Bitget Wallet official NoGas Order Mode swap. This is not a free gas claim. If the quote supports no_gas, the later execution uses an EIP-712 signature and Bitget Wallet covers the native gas fee, deducting its compensation from the swap amount as shown in the official minimum-output quote.',
+  inputSchema: {
+    tokenIn: z.enum(['USDC', 'USDT0', 'USDe', 'USD1']),
+    tokenOut: z.enum(['USDC', 'USDT0', 'USDe', 'USD1']),
+    amount: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
+    slippage: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/).default('1')
+  }
+}, async ({ tokenIn, tokenOut, amount, slippage }) => {
+  const { address } = await morphAccount();
+  const result = await getMorphNoGasOrder({ tokenIn, tokenOut, amount, slippage, address });
+  const { quoteId, expiresAt } = storePendingSwapQuote({ ...result, expiresInSeconds: 300 }, address);
+  return textResult(JSON.stringify({
+    ...result,
+    quoteId,
+    expiresAt: new Date(expiresAt).toISOString(),
+    noGas: true,
+    nativeGasRequired: false,
+    signing: 'Bitget Wallet eth_sign of each returned EIP-712 hash',
+    execution: 'After showing and obtaining user confirmation for the pair, input amount, minimum output, deadline, and EIP-712 structured signing request, call swap_execute with this quoteId.'
+  }));
+});
+
 server.registerTool('swap_authorize_session', {
   title: 'Authorize a bounded swap session',
   description: 'In acknowledged developer mode, request one bounded ERC-20 allowance for a token and spender from a live quote. Requires clear user confirmation before submission. This creates an off-chain time window and on-chain amount cap. ERC-20 allowance itself does not expire, and every swap transaction still requires Bitget Wallet approval.',
@@ -380,6 +409,7 @@ server.registerTool('swap_authorize_session', {
   const { p, address } = await morphAccount();
   const quote = await getSwapQuote(quoteId, address);
   const asset = MORPH_ASSETS[quote.tokenIn];
+  if (quote.mode === 'no_gas') throw new Error('NoGas swaps do not use ERC-20 approval. Call swap_execute to sign the official EIP-712 request.');
   if (!asset.contract) throw new Error('Native ETH does not require token approval.');
   const maxAmountRaw = amountToRaw(asset, maxAmount);
   const currentAllowance = await readTokenAllowance(p, asset.contract, address, quote.transaction.to);
@@ -480,6 +510,7 @@ server.registerTool('swap_approve', {
 }, async ({ quoteId }) => {
   const { p, address } = await morphAccount();
   const quote = await getSwapQuote(quoteId, address);
+  if (quote.mode === 'no_gas') throw new Error('NoGas swaps do not use ERC-20 approval. Call swap_execute to sign the official EIP-712 request.');
   const asset = MORPH_ASSETS[quote.tokenIn];
   if (!asset.contract) throw new Error('Native ETH does not require token approval.');
   const exactAmount = BigInt(quote.transaction.value === '0' ? quote.amount.split('.')[0] + (quote.amount.split('.')[1] || '').padEnd(asset.decimals, '0') : '0');
@@ -497,11 +528,39 @@ server.registerTool('swap_approve', {
 
 server.registerTool('swap_execute', {
   title: 'Request Bitget Wallet swap approval',
-  description: 'Submit the saved Bitget Wallet Morph swap transaction. In lightweight mode, require clear user confirmation for this swap. In developer mode, a currently active bounded swap authorization permits submission without another conversational authorization prompt when the token, spender, duration, and remaining allowance match. Every transaction still requires Bitget Wallet signing.',
+  description: 'Submit a saved Bitget Wallet Morph swap. For NoGas orders, first show the pair, amount, minimum output, deadline, and EIP-712 data and obtain clear user confirmation, then Bitget Wallet signs each hash using eth_sign. In lightweight mode, require clear user confirmation for a regular swap. Every swap still requires Bitget Wallet signing.',
   inputSchema: { quoteId: z.string().uuid() }
 }, async ({ quoteId }) => {
   const { p, address } = await morphAccount();
   const quote = await getSwapQuote(quoteId, address);
+  if (quote.mode === 'no_gas') {
+    const signedTxs = [];
+    for (const signatureRequest of quote.signatures) {
+      const signature = await p.request({ method: 'eth_sign', params: [address, signatureRequest.hash] });
+      if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
+        throw new Error('Bitget Wallet returned an invalid NoGas signature.');
+      }
+      signedTxs.push(signature);
+    }
+    const submitted = await submitMorphNoGasOrder({ orderId: quote.orderId, signedTxs });
+    pendingSwapQuotes.delete(quoteId);
+    return textResult(JSON.stringify({
+      submitted: true,
+      type: 'no_gas_swap',
+      network: quote.network,
+      chainId: quote.chainId,
+      tokenIn: quote.tokenIn,
+      tokenOut: quote.tokenOut,
+      amount: quote.amount,
+      estimatedOutput: quote.estimatedOutput,
+      minimumOutput: quote.minimumOutput,
+      market: quote.market,
+      orderId: quote.orderId,
+      signedCount: signedTxs.length,
+      nativeGasRequired: false,
+      result: submitted
+    }));
+  }
   const asset = MORPH_ASSETS[quote.tokenIn];
   if (asset.contract) {
     const amountParts = quote.amount.split('.');

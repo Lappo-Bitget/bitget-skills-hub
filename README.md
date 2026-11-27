@@ -52,12 +52,19 @@ npx skills add Lappo-Bitget/bitget-skills-hub --skill bitget-agentic-wallet -g -
 
 ## Bitget Wallet official Morph Swap API
 
-The local bridge exposes `swap_quote`, `swap_approve`, and `swap_execute` for
-the official Bitget Wallet Morph Swap API. The bridge calls the shared proxy at
-`https://morph-agent-id.pages.dev/api/swap-quote`, so users installing this
-repository do not need their own BGW API credentials. The owner configures the
+The local bridge exposes `swap_quote`, `swap_approve`, `swap_execute`, and
+`get_gas` for the official Bitget Wallet Morph Swap API. The bridge calls the
+shared proxy at `https://morph-agent-id.pages.dev/api/swap-quote`, so users
+installing this repository do not need their own BGW API credentials. The owner configures the
 shared API credentials once as Cloudflare Pages Secrets on the `morph-agent-id`
 project:
+
+`get_gas` uses Bitget Wallet's official NoGas Order Mode. It checks the quote's
+`features` for `no_gas`, creates the order, and returns EIP-712 hashes for
+Bitget Wallet to sign. `swap_execute` signs those hashes with `eth_sign` and
+submits them through the official `submitSwapOrder` flow. NoGas is gas-sponsored
+swap execution, not a native-token faucet, and is available only when Bitget
+Wallet reports support for the selected stablecoin pair.
 
 ```text
 BGW_API_KEY=your_api_key
