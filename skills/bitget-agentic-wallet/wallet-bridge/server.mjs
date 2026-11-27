@@ -51,7 +51,7 @@ const pendingSwapQuotes = new Map();
 const swapAuthorizations = new Map();
 try { await unlink(QR_FILE); } catch { /* remove a stale QR from a previous bridge process */ }
 
-const server = new McpServer({ name: 'bitget-wallet-morph', version: '0.1.0' });
+const server = new McpServer({ name: 'bitget-agentic-wallet', version: '0.1.0' });
 
 function textResult(text, image) {
   return {

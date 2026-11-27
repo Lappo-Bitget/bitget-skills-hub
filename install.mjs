@@ -46,8 +46,9 @@ if (configuredProxy) {
 function configureToml(configPath, bridgeServer) {
   mkdirSync(dirname(configPath), { recursive: true });
   const existing = existsSync(configPath) ? readFileSync(configPath, 'utf8') : '';
-  const header = '[mcp_servers.bitget-morph-wallet]';
-  const start = existing.indexOf(header);
+  const header = '[mcp_servers.bitget-agentic-wallet]';
+  const legacyHeader = '[mcp_servers.bitget-morph-wallet]';
+  const start = existing.indexOf(header) >= 0 ? existing.indexOf(header) : existing.indexOf(legacyHeader);
   let existingEnvLine = '';
   if (start >= 0) {
     const next = existing.indexOf('\n[', start + header.length);
@@ -66,7 +67,7 @@ function configureToml(configPath, bridgeServer) {
       envLine = `env = { WALLETCONNECT_PROXY = ${serialized} }`;
     }
   }
-  const block = `[mcp_servers.bitget-morph-wallet]\ncommand = "node"\nargs = [${JSON.stringify(bridgeServer)}]${envLine ? `\n${envLine}` : ''}\n`;
+  const block = `[mcp_servers.bitget-agentic-wallet]\ncommand = "node"\nargs = [${JSON.stringify(bridgeServer)}]${envLine ? `\n${envLine}` : ''}\n`;
   const updated = start >= 0
     ? `${existing.slice(0, start)}${block}${existing.slice(existing.indexOf('\n[', start + header.length) >= 0 ? existing.indexOf('\n[', start + header.length) + 1 : existing.length)}`
     : `${existing.trimEnd()}${existing.trim() ? '\n\n' : ''}${block}`;
@@ -81,14 +82,15 @@ function configureJson(configPath, bridgeServer) {
     catch { throw new Error(`无法解析现有配置文件，已保留原文件: ${configPath}`); }
   }
   data.mcpServers = data.mcpServers && typeof data.mcpServers === 'object' ? data.mcpServers : {};
-  const previous = data.mcpServers['bitget-morph-wallet'];
+  const previous = data.mcpServers['bitget-agentic-wallet'] || data.mcpServers['bitget-morph-wallet'];
   const env = previous?.env && typeof previous.env === 'object' ? { ...previous.env } : {};
   if (configuredProxy) env.WALLETCONNECT_PROXY = configuredProxy;
-  data.mcpServers['bitget-morph-wallet'] = {
+  data.mcpServers['bitget-agentic-wallet'] = {
     command: 'node',
     args: [bridgeServer],
     ...(Object.keys(env).length ? { env } : {})
   };
+  delete data.mcpServers['bitget-morph-wallet'];
   writeFileSync(configPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 }
 

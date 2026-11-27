@@ -26,7 +26,7 @@ The WalletConnect MCP server source is included in this repository. One
 WalletConnect approval requests all six supported EVM networks, so switching
 between them does not require a second wallet connection. The one-step
 installer copies the skill and server, installs the server's locked
-dependencies, then registers `bitget-morph-wallet` in detected local clients.
+dependencies, then registers `bitget-agentic-wallet` in detected local clients.
 It handles Codex, Claude Code, Claude Desktop, Cursor, Windsurf, Gemini CLI,
 and Cline when their local configuration directories are present. Restart the
 client after installation, then ask it to connect Bitget Wallet. The client
