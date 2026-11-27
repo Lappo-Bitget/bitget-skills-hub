@@ -4,11 +4,12 @@ description: >-
   Use for Bitget Wallet operations across supported EVM networks, including
   connection, status, read-only queries, and user-approved transactions on
   BNB Smart Chain, Arbitrum One, Ethereum Mainnet, Polygon PoS, Base, and
-  Morph Mainnet. Morph-specific capabilities include Agent ID reads, bounded
-  swaps, and Hardhat contract builds and deployments.
+  Morph Mainnet. Contract deployment is Morph-specific. Agent ID and wallet operations use the active supported EVM network when the underlying contract or protocol is deployed there.
+  Connection, balances, transfers, approvals, swaps, NoGas, and ordinary EVM
+  transactions use the active supported network.
 ---
 
-# Bitget Wallet EVM connections and Morph operations
+# Bitget Wallet EVM operations and Morph contract deployment
 
 This skill uses the `bitget-agentic-wallet` MCP tools for Bitget Wallet
 connections, EVM reads, and user-approved transactions. Developer mode automatically routes signing to a
@@ -127,9 +128,9 @@ action per view and verify desktop and narrow-screen layouts before delivery.
   the runtime's actual `connect_wallet` MCP tool from `bitget-agentic-wallet`
   (in Codex this is `mcp__bitget_agentic_wallet__connect_wallet`). A single
   WalletConnect approval must request all six supported EVM networks. If the
-  user names a starting network, pass it as `network=morph`, `network=bsc`,
+  user names a starting network, pass the selected key as `network=morph`, `network=bsc`,
   `network=arbitrum`, `network=ethereum`, `network=polygon`, or `network=base`.
-  If no network is named, use `network=morph`. Do not substitute shell
+  If no network is named, use `network=bsc`. Do not substitute shell
   commands, file reads, or a verbal claim that a QR is
   ready. This is a lightweight wallet action and does not require developer
   mode. The call returns a high-resolution PNG image and a WalletConnect URI.
@@ -158,8 +159,8 @@ action per view and verify desktop and narrow-screen layouts before delivery.
   and must not create a second QR. Only create a new QR after the session was
   disconnected or the user explicitly asks to reconnect.
 - Use `wallet_read` for the supported read-only JSON-RPC methods.
-- For a Morph wallet-balance request, use the connected address and read only
-  ETH, BGB, USDC, USDT0, USDe, USD1, and WETH. Take one block number with
+- For a wallet-balance request, use the connected address and read the active network
+  assets supplied or verified for that network. Take one block number with
   `eth_blockNumber` and use that block tag for `eth_getBalance` and every
   ERC-20 `balanceOf` call. For another EVM network, use its active chain and
   the token addresses selected by the user or verified for that chain. Report
@@ -190,8 +191,7 @@ non-HTTP(S) proxy URLs.
 
 The connection bridge supports the following networks. Connection, status,
 read-only RPC calls, and ordinary user-approved EVM transactions operate on
-the active network. Agent ID, the Bitget Wallet Morph Swap API, Morph token
-catalogs, and Morph Hardhat deployment remain Morph-specific.
+the active network. Only Morph contract deployment and Morph-only protocol contracts remain Morph-specific.
 
 | Key | Network | Chain ID | Native gas asset |
 | --- | --- | ---: | --- |
@@ -228,31 +228,24 @@ not add any token to spending or approval presets.
 | WETH | ERC-20 | `0x5300000000000000000000000000000000000011` | 18 |
 | BGB | ERC-20 | `0x389C08Bc23A7317000a1FD76c7c5B0cb0b4640b5` | 18 |
 
-## Swap on Morph
+## Swap on supported EVM networks
 
-Use Bitget Wallet's official Swap API for Morph Mainnet swaps. The API lists
-Morph Chain ID 2818 as supporting Instruction Mode. It requires an API Key and
+Use Bitget Wallet's official Swap API for the active supported EVM network. It requires an API Key and
 API Secret approved for the account. Keep both in server-side Cloudflare Pages
-secrets only. The browser must never receive the API Secret. If credentials or
-Morph access are missing, explain that and do not fall back to an unverified
-router.
+secrets only. The browser must never receive the API Secret. If credentials or access for the selected network are missing, explain that and do not fall back to an unverified router.
 
 The local WalletConnect MCP bridge exposes `swap_quote`, `swap_approve`, and
 `swap_execute`. `swap_quote` calls the shared HTTPS proxy at
 `https://morph-agent-id.pages.dev/api/swap-quote`. The proxy signs requests to
 `https://bopenapi.bgwapi.io` using API credentials stored in Cloudflare Pages
-Secrets. Other users do not need their own API credentials. The API uses `morph`
-as the chain name, the connected address as both sender and recipient,
-smallest-unit integer amounts, the returned market, minimum output, and a
-300-second deadline. The API represents the native token contract as an empty
-string. The selector is limited to ETH, BGB, USDC, USDT0, USDe, USD1, and WETH.
+Secrets. Other users do not need their own API credentials. The API uses the active network key and chain ID, the connected address as both sender and recipient, smallest-unit integer amounts, the returned market, minimum output, and a 300-second deadline. Native assets use an empty token contract, while ERC-20 assets require their verified contract address and decimals on the selected network.
 
 If the shared proxy reports credentials are not configured or the API rejects
 the account, report that response and stop. Never ask users to paste API
 credentials into chat or local skill files.
 
 For Bitget Wallet GetGas, use the official `NoGas` Order Mode flow through the
-`get_gas` MCP tool. This is gas-sponsored swap execution, not a standalone
+`no_gas_mode` MCP tool. This is gas-sponsored swap execution, not a standalone
 native-token faucet. The tool supports the stablecoin catalog, checks that the
 official `getSwapPrice` response includes `features: ["no_gas"]`, and creates a
 `makeSwapOrder` request with `feature: "no_gas"`. EVM responses contain EIP-712
@@ -281,8 +274,7 @@ balances, and never retry an unknown submission.
 
 ## Read queries and Agent ID
 
-From this skill's directory, run `node scripts/morph-rpc.mjs help`. Confirm the
-reported network is Morph Mainnet before interpreting results. Read
+For RPC or read-only tooling, use the active network and verify its chain ID before interpreting results. Read
 [references/agent-id.md](references/agent-id.md) for lookup semantics and
 [references/minting.md](references/minting.md) before a mint or troubleshooting.
 For other wallet operations, read
