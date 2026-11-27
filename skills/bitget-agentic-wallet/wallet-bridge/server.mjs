@@ -10,7 +10,7 @@ import { z } from 'zod';
 import Ws from 'ws';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { resolveWalletConnectProxy } from './proxy.mjs';
-import { getMorphSwapQuote, getMorphNoGasOrder, submitMorphNoGasOrder, MORPH_ASSETS } from './bgw-swap.mjs';
+import { getSwapQuote as getNetworkSwapQuote, getNoGasOrder, submitNoGasOrder } from './evm-swap.mjs';
 import { randomUUID } from 'node:crypto';
 import { getNetwork, networkForChainId, NETWORK_CHAIN_IDS, NETWORK_KEYS, NETWORK_RPC_MAP, supportedNetworkSummary } from './networks.mjs';
 
@@ -32,7 +32,7 @@ if (proxyUrl) {
 }
 const { EthereumProvider } = await import('@walletconnect/ethereum-provider');
 
-const DEFAULT_NETWORK_KEY = 'morph';
+const DEFAULT_NETWORK_KEY = 'bsc';
 
 const PROJECT_ID = process.env.WALLETCONNECT_PROJECT_ID || '8c4660c0aeaeebdec859180fb6679463';
 const DAPP_URL = 'https://morph-agent-id.pages.dev/';
@@ -104,7 +104,7 @@ async function connectedAccount() {
   return { p, address: accounts[0], chainId, network };
 }
 
-async function morphAccount() {
+async function morphDeploymentAccount() {
   const status = await connectedAccount();
   if (status.chainId !== 2818) {
     throw new Error(`This operation is available on Morph Mainnet only. Switch the connected wallet from ${status.network.name} to Morph Mainnet first.`);
@@ -311,12 +311,18 @@ async function getSwapQuote(quoteId, address) {
   return quote;
 }
 
+function assertQuoteNetwork(quote, chainId) {
+  if (quote.chainId !== chainId) {
+    throw new Error('The connected wallet network changed after this quote was created. Request a fresh quote on the active network.');
+  }
+}
+
 async function readTokenAllowance(p, tokenAddress, owner, spender) {
   const addressWord = value => value.slice(2).toLowerCase().padStart(64, '0');
   const data = `0xdd62ed3e${addressWord(owner)}${addressWord(spender)}`;
   const result = await p.request({ method: 'eth_call', params: [{ to: tokenAddress, data }, 'latest'] });
   if (typeof result !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(result)) {
-    throw new Error('Could not verify the input token allowance on Morph.');
+    throw new Error('Could not verify the input token allowance on the active network.');
   }
   return BigInt(result);
 }
@@ -341,23 +347,26 @@ function storePendingSwapQuote(result, address) {
 }
 
 server.registerTool('swap_quote', {
-  title: 'Get a Bitget Wallet Morph swap quote',
-  description: 'Request a Morph quote and transaction calldata from Bitget Wallet official Swap API using the local server credentials. This does not submit a transaction. Show the returned pair, amounts, minimum output, slippage, market, target, and value. In lightweight mode, get clear confirmation before approval and swap submissions. In developer mode, an active bounded session authorizes in-scope swaps without repeated conversational confirmation, while Bitget Wallet still requires a signature for every transaction.',
+  title: 'Get a Bitget Wallet EVM swap quote',
+  description: 'Request a quote and transaction calldata on the currently connected supported EVM network from the Bitget Wallet official Swap API. This does not submit a transaction. Show the active network, pair, amounts, minimum output, slippage, market, target, and value before approval or execution.',
   inputSchema: {
-    tokenIn: z.enum(['ETH', 'BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
-    tokenOut: z.enum(['ETH', 'BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']),
+    tokenIn: z.string().min(1).max(32),
+    tokenOut: z.string().min(1).max(32),
+    tokenInAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+    tokenOutAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+    tokenInDecimals: z.number().int().min(0).max(36).optional(),
+    tokenOutDecimals: z.number().int().min(0).max(36).optional(),
     amount: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
     slippage: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/).default('1')
   }
-  }, async ({ tokenIn, tokenOut, amount, slippage }) => {
-  const { address } = await morphAccount();
-  const result = await getMorphSwapQuote({ tokenIn, tokenOut, amount, slippage, address });
-  const { quoteId, expiresAt } = storePendingSwapQuote(result, address);
-  const asset = MORPH_ASSETS[tokenIn];
+  }, async ({ tokenIn, tokenOut, tokenInAddress, tokenOutAddress, tokenInDecimals, tokenOutDecimals, amount, slippage }) => {
+  const status = await connectedAccount();
+  const result = await getNetworkSwapQuote({ network: status.network.key, tokenIn, tokenOut, tokenInAddress, tokenOutAddress, tokenInDecimals, tokenOutDecimals, amount, slippage, address: status.address });
+  const { quoteId, expiresAt } = storePendingSwapQuote(result, status.address);
+  const asset = { contract: result.tokenInAddress, decimals: result.tokenInDecimals };
   let allowance = null;
   if (asset.contract) {
-    const { p } = await morphAccount();
-    allowance = (await readTokenAllowance(p, asset.contract, address, result.transaction.to)).toString();
+    allowance = (await readTokenAllowance(status.p, asset.contract, status.address, result.transaction.to)).toString();
   }
   const amountInRaw = amount.split('.');
   const exactInputAmount = BigInt(amountInRaw[0] + (amountInRaw[1] || '').padEnd(asset.decimals, '0')).toString();
@@ -372,19 +381,23 @@ server.registerTool('swap_quote', {
   }));
 });
 
-server.registerTool('get_gas', {
+server.registerTool('no_gas_mode', {
   title: 'Check Bitget Wallet NoGas availability',
-  description: 'Prepare a Bitget Wallet official NoGas Order Mode swap. This is not a free gas claim. If the quote supports no_gas, the later execution uses an EIP-712 signature and Bitget Wallet covers the native gas fee, deducting its compensation from the swap amount as shown in the official minimum-output quote.',
+  description: 'Prepare an official Bitget Wallet NoGas Order Mode swap on the currently connected supported EVM network. This is not a free gas claim. If the quote supports no_gas, the later execution uses EIP-712 signatures and Bitget Wallet covers the native gas fee.',
   inputSchema: {
-    tokenIn: z.enum(['USDC', 'USDT0', 'USDe', 'USD1']),
-    tokenOut: z.enum(['USDC', 'USDT0', 'USDe', 'USD1']),
+    tokenIn: z.string().min(1).max(32),
+    tokenOut: z.string().min(1).max(32),
+    tokenInAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+    tokenOutAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+    tokenInDecimals: z.number().int().min(0).max(36).optional(),
+    tokenOutDecimals: z.number().int().min(0).max(36).optional(),
     amount: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/),
     slippage: z.string().regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/).default('1')
   }
-}, async ({ tokenIn, tokenOut, amount, slippage }) => {
-  const { address } = await morphAccount();
-  const result = await getMorphNoGasOrder({ tokenIn, tokenOut, amount, slippage, address });
-  const { quoteId, expiresAt } = storePendingSwapQuote({ ...result, expiresInSeconds: 300 }, address);
+}, async ({ tokenIn, tokenOut, tokenInAddress, tokenOutAddress, tokenInDecimals, tokenOutDecimals, amount, slippage }) => {
+  const status = await connectedAccount();
+  const result = await getNoGasOrder({ network: status.network.key, tokenIn, tokenOut, tokenInAddress, tokenOutAddress, tokenInDecimals, tokenOutDecimals, amount, slippage, address: status.address });
+  const { quoteId, expiresAt } = storePendingSwapQuote({ ...result, expiresInSeconds: 300 }, status.address);
   return textResult(JSON.stringify({
     ...result,
     quoteId,
@@ -406,9 +419,10 @@ server.registerTool('swap_authorize_session', {
   }
 }, async ({ quoteId, maxAmount, durationMinutes }) => {
   if (walletMode !== 'developer') throw new Error('A bounded swap authorization requires acknowledged developer mode.');
-  const { p, address } = await morphAccount();
+  const { p, address, chainId } = await connectedAccount();
   const quote = await getSwapQuote(quoteId, address);
-  const asset = MORPH_ASSETS[quote.tokenIn];
+  assertQuoteNetwork(quote, chainId);
+  const asset = { contract: quote.tokenInAddress, decimals: quote.tokenInDecimals };
   if (quote.mode === 'no_gas') throw new Error('NoGas swaps do not use ERC-20 approval. Call swap_execute to sign the official EIP-712 request.');
   if (!asset.contract) throw new Error('Native ETH does not require token approval.');
   const maxAmountRaw = amountToRaw(asset, maxAmount);
@@ -424,6 +438,7 @@ server.registerTool('swap_authorize_session', {
     token: quote.tokenIn,
     tokenAddress: asset.contract,
     spender: quote.transaction.to,
+    chainId,
     maxAmountRaw: maxAmountRaw.toString(),
     durationMinutes,
     approvalHash: hash,
@@ -433,7 +448,9 @@ server.registerTool('swap_authorize_session', {
   return textResult(JSON.stringify({
     submitted: true,
     type: 'bounded_swap_authorization',
-    network: 'Morph Mainnet',
+    network: quote.network,
+    networkKey: quote.networkKey,
+    chainId: quote.chainId,
     token: quote.tokenIn,
     amountCap: maxAmount,
     spender: quote.transaction.to,
@@ -446,11 +463,11 @@ server.registerTool('swap_authorize_session', {
 server.registerTool('swap_authorization_status', {
   title: 'Verify bounded swap authorization',
   description: 'Check the pending approval receipt and, after confirmation, activate its off-chain time window. The on-chain ERC-20 allowance remains until spent or revoked.',
-  inputSchema: { token: z.enum(['BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']) }
+  inputSchema: { token: z.string().min(1).max(64) }
 }, async ({ token }) => {
-  const { p, address } = await morphAccount();
+  const { p, address, chainId } = await connectedAccount();
   const matches = [...swapAuthorizations.entries()].filter(([, grant]) =>
-    grant.address.toLowerCase() === address.toLowerCase() && grant.token === token
+    grant.address.toLowerCase() === address.toLowerCase() && grant.token === token && grant.chainId === chainId
   );
   if (!matches.length) throw new Error('No bounded swap authorization is pending for this token and wallet.');
   const [key, grant] = matches.at(-1);
@@ -481,11 +498,11 @@ server.registerTool('swap_authorization_status', {
 server.registerTool('swap_authorization_revoke', {
   title: 'Revoke bounded swap allowance',
   description: 'Prepare a zero ERC-20 allowance for the spender in a bounded swap session. Show the current allowance and get clear user confirmation before calling. Bitget Wallet still asks the user to sign.',
-  inputSchema: { token: z.enum(['BGB', 'USDC', 'USDT0', 'USDe', 'USD1', 'WETH']) }
+  inputSchema: { token: z.string().min(1).max(64) }
 }, async ({ token }) => {
-  const { p, address } = await morphAccount();
+  const { p, address, chainId } = await connectedAccount();
   const matching = [...swapAuthorizations.entries()].filter(([, grant]) =>
-    grant.address.toLowerCase() === address.toLowerCase() && grant.token === token
+    grant.address.toLowerCase() === address.toLowerCase() && grant.token === token && grant.chainId === chainId
   );
   if (!matching.length) throw new Error('No bounded swap authorization is recorded for this token and wallet.');
   const [key, grant] = matching.at(-1);
@@ -505,13 +522,14 @@ server.registerTool('swap_authorization_revoke', {
 
 server.registerTool('swap_approve', {
   title: 'Request exact token approval for a swap',
-  description: 'Prepare an exact ERC-20 allowance for a previously displayed Bitget Wallet quote. Call only after showing token, exact amount, spender, Morph network, and fees and receiving the user’s clear confirmation. Bitget Wallet still asks the user to sign. A fresh quote is required after approval.',
+  description: 'Prepare an exact ERC-20 allowance for a previously displayed Bitget Wallet quote. Call only after showing token, exact amount, spender, active EVM network, and fees and receiving the user’s clear confirmation. Bitget Wallet still asks the user to sign. A fresh quote is required after approval.',
   inputSchema: { quoteId: z.string().uuid() }
 }, async ({ quoteId }) => {
-  const { p, address } = await morphAccount();
+  const { p, address, chainId } = await connectedAccount();
   const quote = await getSwapQuote(quoteId, address);
+  assertQuoteNetwork(quote, chainId);
   if (quote.mode === 'no_gas') throw new Error('NoGas swaps do not use ERC-20 approval. Call swap_execute to sign the official EIP-712 request.');
-  const asset = MORPH_ASSETS[quote.tokenIn];
+  const asset = { contract: quote.tokenInAddress, decimals: quote.tokenInDecimals };
   if (!asset.contract) throw new Error('Native ETH does not require token approval.');
   const exactAmount = BigInt(quote.transaction.value === '0' ? quote.amount.split('.')[0] + (quote.amount.split('.')[1] || '').padEnd(asset.decimals, '0') : '0');
   if (exactAmount <= 0n) throw new Error('Invalid exact approval amount in the saved quote.');
@@ -528,11 +546,12 @@ server.registerTool('swap_approve', {
 
 server.registerTool('swap_execute', {
   title: 'Request Bitget Wallet swap approval',
-  description: 'Submit a saved Bitget Wallet Morph swap. For NoGas orders, first show the pair, amount, minimum output, deadline, and EIP-712 data and obtain clear user confirmation, then Bitget Wallet signs each hash using eth_sign. In lightweight mode, require clear user confirmation for a regular swap. Every swap still requires Bitget Wallet signing.',
+  description: 'Submit a saved Bitget Wallet swap on the active supported EVM network. For NoGas orders, first show the pair, amount, minimum output, deadline, and EIP-712 data and obtain clear user confirmation, then Bitget Wallet signs each hash using eth_sign. Every swap still requires Bitget Wallet signing.',
   inputSchema: { quoteId: z.string().uuid() }
 }, async ({ quoteId }) => {
-  const { p, address } = await morphAccount();
+  const { p, address, chainId } = await connectedAccount();
   const quote = await getSwapQuote(quoteId, address);
+  assertQuoteNetwork(quote, chainId);
   if (quote.mode === 'no_gas') {
     const signedTxs = [];
     for (const signatureRequest of quote.signatures) {
@@ -542,7 +561,7 @@ server.registerTool('swap_execute', {
       }
       signedTxs.push(signature);
     }
-    const submitted = await submitMorphNoGasOrder({ orderId: quote.orderId, signedTxs });
+    const submitted = await submitNoGasOrder({ orderId: quote.orderId, signedTxs });
     pendingSwapQuotes.delete(quoteId);
     return textResult(JSON.stringify({
       submitted: true,
@@ -561,7 +580,7 @@ server.registerTool('swap_execute', {
       result: submitted
     }));
   }
-  const asset = MORPH_ASSETS[quote.tokenIn];
+  const asset = { contract: quote.tokenInAddress, decimals: quote.tokenInDecimals };
   if (asset.contract) {
     const amountParts = quote.amount.split('.');
     const exactAmount = BigInt(amountParts[0] + (amountParts[1] || '').padEnd(asset.decimals, '0'));
@@ -598,12 +617,12 @@ server.registerTool('swap_execute', {
     value: `0x${BigInt(quote.transaction.value).toString(16)}`
   };
   const hash = await p.request({ method: 'eth_sendTransaction', params: [tx] });
-  return textResult(JSON.stringify({ submitted: true, type: 'swap', network: 'Morph Mainnet', chainId: 2818, tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amount: quote.amount, estimatedOutput: quote.estimatedOutput, minimumOutput: quote.minimumOutput, market: quote.market, hash, transaction: tx }));
+  return textResult(JSON.stringify({ submitted: true, type: 'swap', network: quote.network, networkKey: quote.networkKey, chainId: quote.chainId, tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amount: quote.amount, estimatedOutput: quote.estimatedOutput, minimumOutput: quote.minimumOutput, market: quote.market, hash, transaction: tx }));
 });
 
 server.registerTool('wallet_deploy_contract', {
   title: 'Deploy a contract through Bitget Wallet',
-  description: 'Submit a Morph contract-creation transaction in acknowledged developer mode. The user must review and sign it in Bitget Wallet; no private key is exposed.',
+  description: 'Submit a contract-creation transaction on Morph Mainnet in acknowledged developer mode. The user must review and sign it in Bitget Wallet; no private key is exposed.',
   inputSchema: {
     bytecode: z.string().regex(/^0x(?:[0-9a-fA-F]{2})+$/),
     constructorData: z.string().regex(/^0x(?:[0-9a-fA-F]{2})*$/).default('0x'),
@@ -613,7 +632,7 @@ server.registerTool('wallet_deploy_contract', {
   }
 }, async ({ bytecode, constructorData, value, feeTokenID, feeLimit }) => {
   if (walletMode !== 'developer') throw new Error('Contract deployment requires developer mode. Call wallet_set_mode with explicit acknowledgement first.');
-  const { p, address, chainId } = await morphAccount();
+  const { p, address, chainId } = await morphDeploymentAccount();
   const data = `${bytecode}${constructorData.slice(2)}`;
   const tx = { from: address, data, value, ...(feeTokenID ? { feeTokenID } : {}), ...(feeLimit ? { feeLimit } : {}) };
   const hash = await p.request({ method: 'eth_sendTransaction', params: [tx] });
