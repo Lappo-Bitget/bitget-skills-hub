@@ -1,7 +1,12 @@
 const BITGET_API = 'https://bopenapi.bgwapi.io';
 const QUOTE_PATH = '/bgw-pro/swapx/pro/quote';
 const SWAP_PATH = '/bgw-pro/swapx/pro/swap';
+const NOGAS_PRICE_PATH = '/bgw-pro/swapx/order/getSwapPrice';
+const NOGAS_ORDER_PATH = '/bgw-pro/swapx/order/makeSwapOrder';
+const NOGAS_SUBMIT_PATH = '/bgw-pro/swapx/order/submitSwapOrder';
 const NATIVE_TOKEN = '';
+const NETWORKS = Object.freeze({ morph: 2818, bsc: 56, arbitrum: 42161, ethereum: 1, polygon: 137, base: 8453 });
+const NATIVE_SYMBOLS = Object.freeze({ morph: 'ETH', bsc: 'BNB', arbitrum: 'ETH', ethereum: 'ETH', polygon: 'POL', base: 'ETH' });
 const ASSETS = new Map([
   [NATIVE_TOKEN, { symbol: 'ETH', decimals: 18 }],
   ['0x389c08bc23a7317000a1fd76c7c5b0cb0b4640b5', { symbol: 'BGB', decimals: 18 }],
@@ -13,6 +18,7 @@ const ASSETS = new Map([
 ]);
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const INTEGER = /^(?:0|[1-9][0-9]*)$/;
+const DECIMAL = /^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/;
 const SLIPPAGE = /^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/;
 const HEX_DATA = /^0x(?:[0-9a-fA-F]{2}){4,65536}$/;
 
@@ -130,6 +136,16 @@ function humanToRaw(value, decimals) {
   return whole + fraction.padEnd(decimals, '0');
 }
 
+function resolveAsset(address, symbol, decimals, network) {
+  const contract = String(address || '').toLowerCase();
+  const tokenSymbol = String(symbol || '').trim();
+  if (!contract && tokenSymbol.toUpperCase() === NATIVE_SYMBOLS[network].toUpperCase()) return { symbol: NATIVE_SYMBOLS[network], decimals: 18 };
+  if (network === 'morph' && ASSETS.has(contract)) return ASSETS.get(contract);
+  const parsedDecimals = Number(decimals);
+  if (!ADDRESS.test(contract) || !Number.isInteger(parsedDecimals) || parsedDecimals < 0 || parsedDecimals > 36) return null;
+  return { symbol: tokenSymbol || contract, decimals: parsedDecimals };
+}
+
 export async function onRequestPost({ request, env }) {
   const requestUrl = new URL(request.url);
   const origin = request.headers.get('origin');
@@ -147,15 +163,35 @@ export async function onRequestPost({ request, env }) {
     return json(400, { error: 'Invalid JSON request' });
   }
 
-  const tokenIn = ASSETS.get(String(input?.tokenInAddress || '').toLowerCase());
-  const tokenOut = ASSETS.get(String(input?.tokenOutAddress || '').toLowerCase());
+  const requestedMode = String(input?.mode || 'standard');
+  if (requestedMode === 'no_gas_submit') {
+    const orderId = String(input?.orderId || '');
+    const signedTxs = input?.signedTxs;
+    if (!/^[A-Za-z0-9_-]{8,128}$/.test(orderId) || !Array.isArray(signedTxs) || !signedTxs.length || signedTxs.length > 16 || signedTxs.some(value => typeof value !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(value))) {
+      return json(400, { error: 'Invalid NoGas submission parameters' });
+    }
+    try {
+      const submitted = await signedRequest(NOGAS_SUBMIT_PATH, { orderId, signedTxs }, env);
+      return json(200, { provider: 'Bitget Wallet', mode: 'no_gas_submit', result: submitted });
+    } catch (error) {
+      return json(502, { stage: 'no_gas_submit', error: error?.message || 'Bitget Wallet NoGas 提交失败。' });
+    }
+  }
+
   const tokenInAddress = String(input?.tokenInAddress || '').toLowerCase();
   const tokenOutAddress = String(input?.tokenOutAddress || '').toLowerCase();
   const recipient = input?.recipient;
   const amount = input?.amount;
   const slippage = input?.slippage;
+  const mode = requestedMode;
+  const network = String(input?.network || '').toLowerCase();
+  if (!Object.hasOwn(NETWORKS, network) || Number(input?.chainId) !== NETWORKS[network]) {
+    return json(400, { error: 'Unsupported EVM network or chain ID mismatch' });
+  }
+  const tokenIn = resolveAsset(tokenInAddress, input?.tokenIn, input?.tokenInDecimals, network);
+  const tokenOut = resolveAsset(tokenOutAddress, input?.tokenOut, input?.tokenOutDecimals, network);
   const bps = parseSlippage(slippage);
-  if (!tokenIn || !tokenOut || tokenInAddress === tokenOutAddress ||
+  if (!['standard', 'no_gas'].includes(mode) || !tokenIn || !tokenOut || tokenInAddress === tokenOutAddress ||
       !ADDRESS.test(recipient || '') || /^0x0{40}$/i.test(recipient || '') ||
       typeof amount !== 'string' || !INTEGER.test(amount) || amount === '0' || amount.length > 80 ||
       !bps || typeof slippage !== 'string') {
@@ -163,13 +199,13 @@ export async function onRequestPost({ request, env }) {
   }
 
   const common = {
-    fromChain: 'morph',
+    fromChain: network,
     fromContract: tokenInAddress,
     // Bitget Wallet Instruction Mode expects human-readable amounts.
     fromAmount: rawToHuman(amount, tokenIn.decimals),
     fromAddress: recipient,
     toAddress: recipient,
-    toChain: 'morph',
+    toChain: network,
     toContract: tokenOutAddress,
     // Keep quote generation independent of the current wallet balance. The
     // bridge checks the balance before any approval or execution step.
@@ -178,6 +214,52 @@ export async function onRequestPost({ request, env }) {
 
   let stage = 'quote';
   try {
+    if (mode === 'no_gas') {
+      const orderCommon = {
+        fromChain: network,
+        fromContract: tokenInAddress,
+        fromAmount: rawToHuman(amount, tokenIn.decimals),
+        fromAddress: recipient,
+        toAddress: recipient,
+        toChain: network,
+        toContract: tokenOutAddress
+      };
+      const price = await signedRequest(NOGAS_PRICE_PATH, orderCommon, env);
+      const features = Array.isArray(price.features) ? price.features.map(String) : [];
+      if (!features.includes('no_gas')) {
+        return json(409, { error: 'Bitget Wallet NoGas is unavailable for this pair on the selected network.', features, market: price.market || null });
+      }
+      if (typeof price.market !== 'string' || !price.market) {
+        return json(502, { error: 'Bitget Wallet NoGas 报价缺少 market。' });
+      }
+      stage = 'no_gas_order';
+      const order = await signedRequest(NOGAS_ORDER_PATH, {
+        ...orderCommon,
+        market: price.market,
+        slippage: String(Number(slippage) / 100),
+        feature: 'no_gas'
+      }, env);
+      if (typeof order.orderId !== 'string' || !order.orderId || !Array.isArray(order.signatures) || !order.signatures.length) {
+        return json(502, { error: 'Bitget Wallet NoGas 返回的订单签名数据无效。' });
+      }
+      const signatures = order.signatures.map(item => ({ kind: item?.kind, chainName: item?.chainName, chainId: item?.chainId, hash: item?.hash, data: item?.data }));
+      if (signatures.some(item => item.kind !== 'signature' || typeof item.hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(item.hash) || item.data?.signType !== 'eip712')) {
+        return json(502, { error: 'Bitget Wallet NoGas 返回了无法验证的 EIP-712 签名数据。' });
+      }
+      const estimatedOutput = price.toAmount ?? order.toAmount ?? order.toMinAmount;
+      const minimumOutput = order.toMinAmount ?? price.minToAmount ?? estimatedOutput;
+      if (typeof estimatedOutput !== 'string' || !/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(estimatedOutput) ||
+          typeof minimumOutput !== 'string' || !/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(minimumOutput)) {
+        return json(502, { error: 'Bitget Wallet NoGas 返回的数量无效。' });
+      }
+      const estimatedRaw = BigInt(humanToRaw(estimatedOutput, tokenOut.decimals));
+      const minimumRaw = BigInt(humanToRaw(minimumOutput, tokenOut.decimals));
+      if (estimatedRaw <= 0n || minimumRaw <= 0n || minimumRaw > estimatedRaw) {
+        return json(502, { error: 'Bitget Wallet NoGas 返回的最小收到数量无效。' });
+      }
+      return json(200, { provider: 'Bitget Wallet', mode: 'no_gas', network, chainId: NETWORKS[network], quote: { toAmount: estimatedOutput, minToAmount: minimumOutput, market: price.market, slippage: String(order.slippage ?? slippage), deadline: order.signatures[0]?.data?.message?.deadline ?? 300, features }, order: { orderId: order.orderId, signatures } });
+    }
+
     const quote = await signedRequest(QUOTE_PATH, common, env);
     if (typeof quote.toAmount !== 'string' ||
         !/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(quote.toAmount) ||
@@ -203,6 +285,9 @@ export async function onRequestPost({ request, env }) {
 
     return json(200, {
       provider: 'Bitget Wallet',
+      network,
+      chainId: NETWORKS[network],
+      mode: 'standard',
       quote: {
         toAmount: quotedAmount.toString(),
         minToAmount: minAmount.toString(),
